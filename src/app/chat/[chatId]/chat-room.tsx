@@ -26,6 +26,7 @@ import {
 import { ImageLightbox } from "@/components/chat/image-lightbox";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
+import { EncryptionSequence } from "@/components/chat/encryption-sequence";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
 
@@ -76,6 +77,7 @@ export function ChatRoom({
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, string>>({});
   const [micError, setMicError] = useState<string | null>(null);
+  const [showEncryption, setShowEncryption] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -439,7 +441,17 @@ export function ChatRoom({
     isAtBottomRef.current = true;
     setMessages((prev) => [...prev, optimisticMessage]);
 
-    await performSend(id, text || null, attachmentToSend);
+    // Fire-and-forget: the actual send happens in the background while
+    // <EncryptionSequence /> plays its own fixed-length show. sending stays
+    // true until that sequence's onComplete fires below, not until the
+    // network call resolves — the message is already visible (optimistic)
+    // either way.
+    void performSend(id, text || null, attachmentToSend);
+    setShowEncryption(true);
+  }
+
+  function handleEncryptionComplete() {
+    setShowEncryption(false);
     setSending(false);
   }
 
@@ -705,6 +717,7 @@ export function ChatRoom({
       {lightboxSrc && (
         <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
+      <EncryptionSequence active={showEncryption} onComplete={handleEncryptionComplete} />
     </div>
   );
 }

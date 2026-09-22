@@ -36,3 +36,78 @@ select {
     text-wrap: balance;
   }
 }
+
+/* <EncryptionSequence /> terminal effects — see src/components/chat/encryption-sequence.tsx */
+@keyframes encryption-scanline-move {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 100%;
+  }
+}
+
+.encryption-scanlines::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 255, 140, 0.06) 0px,
+    rgba(0, 255, 140, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  animation: encryption-scanline-move 8s linear infinite;
+}
+
+@keyframes encryption-glitch {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  20% {
+    transform: translate(-1px, 0.5px);
+    opacity: 0.85;
+  }
+  40% {
+    transform: translate(1px, -0.5px);
+    opacity: 1;
+  }
+  60% {
+    transform: translate(-0.5px, 0);
+    opacity: 0.9;
+  }
+  80% {
+    transform: translate(0.5px, 0.5px);
+    opacity: 1;
+  }
+}
+
+.encryption-glitch {
+  animation: encryption-glitch 2.4s steps(2, jump-none) infinite;
+}
+
+@keyframes encryption-flicker {
+  0%,
+  19%,
+  21%,
+  23%,
+  25%,
+  54%,
+  56%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  24%,
+  55% {
+    opacity: 0.94;
+  }
+}
+
+.encryption-flicker {
+  animation: encryption-flicker 4s infinite;
+}
