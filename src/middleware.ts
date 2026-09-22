@@ -1,7 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  // PWA assets: fetched by the browser/OS to check install eligibility and
+  // to register/update the service worker, both of which happen outside
+  // any authenticated page context.
+  "/manifest.json",
+  "/icons",
+  "/sw.js",
+  "/workbox-",
+];
 
 /**
  * Refreshes the Supabase auth session on every request (so Server Components
