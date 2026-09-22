@@ -10,6 +10,7 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
+import { AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 import { ChatUploadError, uploadToBucket } from "@/lib/chat/storage-upload";
@@ -27,6 +28,8 @@ import { ImageLightbox } from "@/components/chat/image-lightbox";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
 import { EncryptionSequence } from "@/components/chat/encryption-sequence";
+import { PigeonFlightMap } from "@/components/chat/pigeon-flight-map";
+import { PigeonStatusBadge } from "@/components/chat/pigeon-status-badge";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
 
@@ -78,6 +81,8 @@ export function ChatRoom({
   const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, string>>({});
   const [micError, setMicError] = useState<string | null>(null);
   const [showEncryption, setShowEncryption] = useState(false);
+  const [openFlightMessageId, setOpenFlightMessageId] = useState<string | null>(null);
+  const lastSentMessageIdRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -447,12 +452,20 @@ export function ChatRoom({
     // network call resolves — the message is already visible (optimistic)
     // either way.
     void performSend(id, text || null, attachmentToSend);
+    lastSentMessageIdRef.current = id;
     setShowEncryption(true);
   }
 
   function handleEncryptionComplete() {
     setShowEncryption(false);
     setSending(false);
+    // Fade/wipe straight into the flight map for the message that was just
+    // "launched" — the flight row itself may still be a beat behind (the
+    // edge function runs async), the map shows its own loading state for
+    // that gap.
+    if (lastSentMessageIdRef.current) {
+      setOpenFlightMessageId(lastSentMessageIdRef.current);
+    }
   }
 
   function retrySend(message: DisplayMessage) {
@@ -591,6 +604,13 @@ export function ChatRoom({
                     </button>
                   </div>
                 )}
+                {!message.pending && !hasError && (
+                  <PigeonStatusBadge
+                    messageId={message.id}
+                    isOwn={isOwn}
+                    onOpen={() => setOpenFlightMessageId(message.id)}
+                  />
+                )}
               </div>
             </div>
           );
@@ -718,6 +738,15 @@ export function ChatRoom({
         <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
       <EncryptionSequence active={showEncryption} onComplete={handleEncryptionComplete} />
+      <AnimatePresence>
+        {openFlightMessageId && (
+          <PigeonFlightMap
+            key={openFlightMessageId}
+            messageId={openFlightMessageId}
+            onClose={() => setOpenFlightMessageId(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { PwaInstallPrompt } from "@/components/pwa/pwa-install-prompt";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
