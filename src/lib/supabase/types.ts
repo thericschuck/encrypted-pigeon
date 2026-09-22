@@ -1,5 +1,11 @@
 // Hand-written types matching supabase/migrations/20260920000000_init_schema.sql.
 // Replace with `supabase gen types typescript` output once the project is linked.
+//
+// Every table needs `Relationships` and every schema needs `Views`/`Functions`
+// (even if empty) — @supabase/supabase-js's SupabaseClient generic requires
+// Database[SchemaName] to satisfy GenericSchema from @supabase/postgrest-js,
+// or it silently resolves to `never` and every .from(...) call collapses to
+// `never` with no error at the call site, only at every usage downstream.
 
 export type PigeonFlightStatus = "encrypting" | "in_transit" | "delivered";
 
@@ -28,6 +34,7 @@ export interface Database {
           avatar_url?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       chats: {
         Row: {
@@ -42,6 +49,7 @@ export interface Database {
           id?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
       chat_participants: {
         Row: {
@@ -59,6 +67,7 @@ export interface Database {
           user_id?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
       messages: {
         Row: {
@@ -91,6 +100,7 @@ export interface Database {
           audio_duration_seconds?: number | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       pigeon_flights: {
         Row: {
@@ -123,7 +133,10 @@ export interface Database {
           status?: PigeonFlightStatus;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
   };
 }
