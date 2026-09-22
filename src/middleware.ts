@@ -1,9 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const PUBLIC_PATHS = ["/login", "/auth/callback"];
+
 /**
- * Refreshes the Supabase auth session on every request so Server Components
- * always see a valid (non-expired) session via lib/supabase/server.ts.
+ * Refreshes the Supabase auth session on every request (so Server Components
+ * always see a valid, non-expired session via lib/supabase/server.ts) and
+ * redirects signed-out users to /login for everything except the public
+ * paths above.
  */
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -29,7 +33,21 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const isPublicPath = PUBLIC_PATHS.some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  );
+
+  if (!user && !isPublicPath) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (user && request.nextUrl.pathname === "/login") {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
 
   return response;
 }

@@ -67,6 +67,8 @@ export interface Database {
           sender_id: string;
           content: string | null;
           image_url: string | null;
+          audio_url: string | null;
+          audio_duration_seconds: number | null;
           created_at: string;
         };
         Insert: {
@@ -75,6 +77,8 @@ export interface Database {
           sender_id: string;
           content?: string | null;
           image_url?: string | null;
+          audio_url?: string | null;
+          audio_duration_seconds?: number | null;
           created_at?: string;
         };
         Update: {
@@ -83,6 +87,8 @@ export interface Database {
           sender_id?: string;
           content?: string | null;
           image_url?: string | null;
+          audio_url?: string | null;
+          audio_duration_seconds?: number | null;
           created_at?: string;
         };
       };

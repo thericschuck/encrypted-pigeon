@@ -20,6 +20,17 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Form fields keep a fixed light background (Tailwind classes like
+   bg-white/border-neutral-300 throughout the app assume this), so their
+   text color must stay fixed too — otherwise --foreground turning light in
+   dark mode leaves light text on that same light background. */
+input,
+textarea,
+select {
+  color: #171717;
+  background-color: #ffffff;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
