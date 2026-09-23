@@ -14,7 +14,13 @@ const geistMono = localFont({
   weight: "100 900",
 });
 
+// Falls back to localhost so `next build` never fails when the env var is
+// unset (e.g. a preview build); NEXT_PUBLIC_SITE_URL is what's actually used
+// in production (set it to https://encrypted-pigeon.com in Vercel).
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Encrypted Pigeon",
   description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
   manifest: "/manifest.json",
@@ -30,6 +36,26 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "Pigeon",
+  },
+  openGraph: {
+    title: "Encrypted Pigeon",
+    description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
+    url: "/",
+    siteName: "Encrypted Pigeon",
+    images: [{ url: "/icons/icon-512.png", width: 512, height: 512 }],
+    locale: "de_DE",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Encrypted Pigeon",
+    description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
+    images: ["/icons/icon-512.png"],
+  },
+  robots: {
+    // Private messenger, not a marketing site — keep it out of search results.
+    index: false,
+    follow: false,
   },
 };
 
