@@ -44,6 +44,10 @@ export function uploadToBucket({
     xhr.setRequestHeader("apikey", apiKey);
     xhr.setRequestHeader("Content-Type", contentType || "application/octet-stream");
     xhr.setRequestHeader("x-upsert", "true");
+    // One object path per message and never changed afterwards, so the
+    // browser may keep it (served under a reused signed URL, see
+    // signed-url-cache.ts) instead of downloading it again.
+    xhr.setRequestHeader("cache-control", "max-age=31536000");
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { MEMBER_PROFILE_COLUMNS, type MemberProfile } from "@/lib/profile";
 import { PushSettings } from "@/components/settings/push-settings";
 import { ProfileSettings } from "@/components/settings/profile-settings";
@@ -9,10 +9,7 @@ import { ThemeSync } from "@/components/theme-sync";
 import { SignOutButton } from "@/components/settings/sign-out-button";
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user) {
     redirect("/login");

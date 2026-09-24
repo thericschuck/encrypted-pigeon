@@ -26,7 +26,9 @@ export function PwaInstallPrompt() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => setHasSession(!!data.user));
+    // Only decides whether to show the install hint — the locally stored
+    // session is enough, no need for a round trip to the Auth server.
+    supabase.auth.getSession().then(({ data }) => setHasSession(!!data.session));
   }, []);
 
   useEffect(() => {

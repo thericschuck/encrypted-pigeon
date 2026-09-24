@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensureMembership } from "@/lib/auth/bootstrap";
 import { isAdminEmail } from "@/lib/auth/admin-email";
@@ -11,8 +11,7 @@ import { MagicLinkForm } from "@/components/magic-link-form";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { Avatar } from "@/components/ui/avatar";
-import { ChatList } from "@/components/dashboard/chat-list";
-import { ChatListLiveRefresh } from "@/components/dashboard/chat-list-live-refresh";
+import { LiveChatList } from "@/components/dashboard/live-chat-list";
 
 async function loadPendingInvites() {
   // pigeon.invites is service-role only (not readable through RLS at all).
@@ -26,32 +25,34 @@ async function loadPendingInvites() {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user?.email) {
     redirect("/login");
   }
 
-  // Also self-heals a member whose profile/home chat is missing.
-  const membership = await ensureMembership({ id: user.id, email: user.email });
-  if (membership.status === "not_invited") {
-    redirect("/auth/signout?error=not_invited");
-  }
-
   const isAdmin = isAdminEmail(user.email);
-  const [overview, pendingInvites] = await Promise.all([
+  const [initialOverview, pendingInvites] = await Promise.all([
     loadChatOverview(supabase, user.id),
     isAdmin ? loadPendingInvites() : Promise.resolve([]),
   ]);
+  let overview = initialOverview;
+
+  // Every login already ran ensureMembership. Here it's only the
+  // self-heal for a member whose profile or home chat is missing — so it
+  // runs (and costs its service-role queries) only when that's the case.
+  if (!overview.me || (!isAdmin && overview.chats.length === 0)) {
+    const membership = await ensureMembership({ id: user.id, email: user.email });
+    if (membership.status === "not_invited") {
+      redirect("/auth/signout?error=not_invited");
+    }
+    overview = await loadChatOverview(supabase, user.id);
+  }
   const { me } = overview;
 
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <SessionWatcher />
-      <ChatListLiveRefresh />
       {me && <ThemeSync theme={me.theme} />}
 
       <header className="flex items-center gap-3 px-3">
@@ -78,7 +79,7 @@ export default async function DashboardPage() {
         </Link>
       </header>
 
-      <ChatList chats={overview.chats} membersWithoutChat={overview.membersWithoutChat} />
+      <LiveChatList userId={user.id} chats={overview.chats} membersWithoutChat={overview.membersWithoutChat} />
 
       {isAdmin && (
         <section className="flex flex-col gap-3 rounded-2xl border border-neutral-200 p-4 dark:border-night-border dark:bg-night-surface">

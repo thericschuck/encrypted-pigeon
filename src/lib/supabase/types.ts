@@ -209,6 +209,20 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      // supabase/migrations/20260924030000_latest_message_per_chat.sql
+      latest_messages_for_chats: {
+        Args: { p_chat_ids: string[] };
+        Returns: {
+          chat_id: string;
+          sender_id: string;
+          kind: MessageKind;
+          content: string | null;
+          image_url: string | null;
+          audio_url: string | null;
+          created_at: string;
+        }[];
+      };
+    };
   };
 }

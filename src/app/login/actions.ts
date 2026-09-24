@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { ensureMembership } from "@/lib/auth/bootstrap";
+import { authCallbackUrl } from "@/lib/site-url";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
 import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
 
@@ -22,7 +23,7 @@ export async function sendMagicLink(
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      emailRedirectTo: await authCallbackUrl(),
       // Never create accounts from the public login page — new people only
       // come in through an invite (admin dashboard).
       shouldCreateUser: false,

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { MEMBER_PROFILE_COLUMNS, displayNameOf, type MemberProfile } from "@/lib/profile";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { Avatar } from "@/components/ui/avatar";
+import { CHAT_PAGE_SIZE } from "@/lib/chat/pagination";
 import { ChatRoom } from "./chat-room";
 
 interface ChatPageProps {
@@ -12,10 +13,7 @@ interface ChatPageProps {
 }
 
 export default async function ChatPage({ params }: ChatPageProps) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user) {
     redirect("/login");
@@ -37,8 +35,10 @@ export default async function ChatPage({ params }: ChatPageProps) {
 
   // RLS on messages already hides pigeon letters still in flight to me —
   // they show up as "incoming pigeon" placeholders (from the flight rows)
-  // until they land.
-  const [{ data: profiles }, { data: messages }] = await Promise.all([
+  // until they land. Only the newest page is loaded here; <ChatRoom />
+  // fetches older ones on demand when scrolling up. One extra row tells
+  // whether there is anything older at all.
+  const [{ data: profiles }, { data: newestFirst }] = await Promise.all([
     supabase
       .from("profiles")
       .select(MEMBER_PROFILE_COLUMNS)
@@ -47,8 +47,11 @@ export default async function ChatPage({ params }: ChatPageProps) {
       .from("messages")
       .select("*")
       .eq("chat_id", params.chatId)
-      .order("created_at", { ascending: true }),
+      .order("created_at", { ascending: false })
+      .limit(CHAT_PAGE_SIZE + 1),
   ]);
+  const hasOlderMessages = (newestFirst?.length ?? 0) > CHAT_PAGE_SIZE;
+  const messages = (newestFirst ?? []).slice(0, CHAT_PAGE_SIZE).reverse();
 
   const me = (profiles ?? []).find((p) => p.id === user.id) as MemberProfile | undefined;
   const partner = ((profiles ?? []).find((p) => p.id === otherUserId) as MemberProfile | undefined) ?? null;
@@ -106,7 +109,8 @@ export default async function ChatPage({ params }: ChatPageProps) {
           chatId={params.chatId}
           me={me}
           partner={partner}
-          initialMessages={messages ?? []}
+          initialMessages={messages}
+          initialHasOlder={hasOlderMessages}
         />
       </div>
     </main>

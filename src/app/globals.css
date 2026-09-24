@@ -116,7 +116,7 @@ body {
   }
 }
 
-/* <EncryptionSequence /> terminal effects — see src/components/chat/encryption-sequence.tsx */
+/* <EncryptionSequence /> terminal effects (in-chat, per message) — see src/components/chat/encryption-sequence.tsx */
 @keyframes encryption-scanline-move {
   0% {
     background-position: 0 0;
@@ -167,28 +167,6 @@ body {
 
 .encryption-glitch {
   animation: encryption-glitch 2.4s steps(2, jump-none) infinite;
-}
-
-@keyframes encryption-flicker {
-  0%,
-  19%,
-  21%,
-  23%,
-  25%,
-  54%,
-  56%,
-  100% {
-    opacity: 1;
-  }
-  20%,
-  24%,
-  55% {
-    opacity: 0.94;
-  }
-}
-
-.encryption-flicker {
-  animation: encryption-flicker 4s infinite;
 }
 
 /* <PigeonFlightMap /> — src/components/chat/pigeon-flight-map.tsx */

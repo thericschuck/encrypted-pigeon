@@ -10,7 +10,7 @@ import { ensureMembership, type MembershipResult } from "@/lib/auth/bootstrap";
  * cookies, so this server action's createClient() picks it up here to do the
  * privileged bootstrap + redirect.
  */
-export async function completeAuthCallback() {
+export async function completeAuthCallback({ setPassword }: { setPassword: boolean }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,5 +38,12 @@ export async function completeAuthCallback() {
 
   // A freshly invited friend lands straight in the chat with whoever
   // invited them; everyone else on the dashboard.
-  redirect(membership.homeChatId ? `/chat/${membership.homeChatId}` : "/");
+  const destination = membership.homeChatId ? `/chat/${membership.homeChatId}` : "/";
+
+  // Invite / reset links: choose a password (and name) first, so the
+  // account can be used with the password login from now on.
+  if (setPassword) {
+    redirect(`/auth/set-password?next=${encodeURIComponent(destination)}`);
+  }
+  redirect(destination);
 }

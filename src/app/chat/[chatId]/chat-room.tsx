@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,7 +13,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, MessageKind } from "@/lib/supabase/types";
 import { ChatUploadError, uploadToBucket } from "@/lib/chat/storage-upload";
@@ -27,6 +28,15 @@ import {
   buildChatVoicePath,
 } from "@/lib/chat/voice-recording";
 import { FLIGHT_COLUMNS, type FlightRow } from "@/lib/chat/flights";
+import { CHAT_PAGE_SIZE } from "@/lib/chat/pagination";
+import { previewOf } from "@/lib/chat/chat-overview";
+import { noteChatActivity } from "@/lib/chat/chat-list-store";
+import {
+  SIGNED_URL_TTL_SECONDS,
+  cacheSignedUrls,
+  forgetSignedUrl,
+  getCachedSignedUrl,
+} from "@/lib/chat/signed-url-cache";
 import { playEncryptEnd, playEncryptStart } from "@/lib/chat/chime-sounds";
 import {
   isSessionExpiredError,
@@ -71,7 +81,10 @@ interface ChatRoomProps {
   chatId: string;
   me: MemberProfile;
   partner: MemberProfile | null;
+  /** The newest CHAT_PAGE_SIZE messages, oldest first. */
   initialMessages: MessageRow[];
+  /** Whether there are messages older than initialMessages. */
+  initialHasOlder: boolean;
 }
 
 interface StorageRef {
@@ -82,7 +95,9 @@ interface StorageRef {
 // How close to the bottom (px) still counts as "at the bottom" for
 // deciding whether to auto-scroll on new messages.
 const BOTTOM_THRESHOLD_PX = 80;
-const SIGNED_URL_TTL_SECONDS = 60 * 60;
+// How close to the top (px) starts loading the next older page, so it's
+// usually there before the user actually reaches the top.
+const LOAD_OLDER_THRESHOLD_PX = 400;
 
 function sendErrorMessage(): string {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -143,21 +158,22 @@ function ChatImage({
   );
 }
 
-export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps) {
+export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder }: ChatRoomProps) {
   const currentUserId = me.id;
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [flights, setFlights] = useState<Record<string, FlightRow>>({});
   const [flightsLoading, setFlightsLoading] = useState(true);
   const [mode, setMode] = useState<MessageKind>("chat");
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [attachmentLoadErrors, setAttachmentLoadErrors] = useState<Record<string, string>>({});
   const [micError, setMicError] = useState<string | null>(null);
-  const [showEncryption, setShowEncryption] = useState(false);
+  // Own chat messages whose hacker show is still playing in place of the
+  // bubble. Per message, so sending never waits for a previous show.
+  const [encryptingIds, setEncryptingIds] = useState<Set<string>>(() => new Set());
   const [openFlightMessageId, setOpenFlightMessageId] = useState<string | null>(null);
   // Coarse clock for the "noch ca. X Min" on incoming-pigeon placeholders.
   const [now, setNow] = useState(() => Date.now());
@@ -176,6 +192,20 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
   const latestServerCreatedAtRef = useRef<string | null>(
     initialMessages.length > 0 ? initialMessages[initialMessages.length - 1].created_at : null
   );
+  // created_at of the oldest loaded server row — the history window starts
+  // here. Also bounds which flights / landed letters are worth loading:
+  // anything that happened before it belongs to not-yet-loaded history.
+  const [oldestLoadedAt, setOldestLoadedAt] = useState<string | null>(
+    initialMessages.length > 0 ? initialMessages[0].created_at : null
+  );
+  const oldestLoadedAtRef = useRef(oldestLoadedAt);
+  oldestLoadedAtRef.current = oldestLoadedAt;
+  const [hasOlder, setHasOlder] = useState(initialHasOlder);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  // scrollHeight right before older messages were prepended, so the view
+  // can stay on the message the user was looking at.
+  const scrollHeightBeforePrependRef = useRef<number | null>(null);
 
   const partnerName = displayNameOf(partner);
   const myPigeonName = pigeonNameOf(me);
@@ -212,23 +242,35 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const appendServerMessages = useCallback((incoming: MessageRow[]) => {
-    if (incoming.length === 0) return;
-    // Compared as dates, not strings: realtime payloads and PostgREST don't
-    // format timestamptz identically. Duplicates from the (ms-rounded)
-    // cursor are harmless — they're filtered by id below.
-    for (const m of incoming) {
-      const current = latestServerCreatedAtRef.current;
-      if (!current || Date.parse(m.created_at) > Date.parse(current)) {
-        latestServerCreatedAtRef.current = new Date(m.created_at).toISOString();
+  const appendServerMessages = useCallback(
+    (incoming: MessageRow[]) => {
+      if (incoming.length === 0) return;
+      // Lets the (server-rendered) chat list show this without a refetch.
+      for (const m of incoming) {
+        noteChatActivity(chatId, {
+          preview: previewOf(m),
+          kind: m.kind,
+          createdAt: m.created_at,
+          fromMe: m.sender_id === currentUserId,
+        });
       }
-    }
-    setMessages((prev) => {
-      const known = new Set(prev.map((m) => m.id));
-      const fresh = incoming.filter((m) => !known.has(m.id));
-      return fresh.length > 0 ? [...prev, ...fresh] : prev;
-    });
-  }, []);
+      // Compared as dates, not strings: realtime payloads and PostgREST don't
+      // format timestamptz identically. Duplicates from the (ms-rounded)
+      // cursor are harmless — they're filtered by id below.
+      for (const m of incoming) {
+        const current = latestServerCreatedAtRef.current;
+        if (!current || Date.parse(m.created_at) > Date.parse(current)) {
+          latestServerCreatedAtRef.current = new Date(m.created_at).toISOString();
+        }
+      }
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        const fresh = incoming.filter((m) => !known.has(m.id));
+        return fresh.length > 0 ? [...prev, ...fresh] : prev;
+      });
+    },
+    [chatId, currentUserId]
+  );
 
   const mergeFlights = useCallback((rows: FlightRow[]) => {
     if (rows.length === 0) return;
@@ -239,14 +281,18 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
     });
   }, []);
 
-  // One query for every flight in this chat — including letters flying to
-  // me whose message row I can't read yet.
+  // One query for the flights that matter for the loaded window: every
+  // letter still in the air (including ones flying to me whose message row
+  // I can't read yet), plus everything that landed within the window.
+  // Older landed flights come along with their history page.
   const fetchFlights = useCallback(async () => {
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("pigeon_flights")
-      .select(FLIGHT_COLUMNS)
-      .eq("chat_id", chatId);
+    let query = supabase.from("pigeon_flights").select(FLIGHT_COLUMNS).eq("chat_id", chatId);
+    const windowStart = oldestLoadedAtRef.current;
+    if (windowStart) {
+      query = query.or(`status.neq.delivered,arrival_time.gte."${windowStart}"`);
+    }
+    const { data, error } = await query;
     if (error) {
       if (isSessionExpiredError(error)) redirectToLoginForExpiredSession();
       else console.error("Failed to load pigeon flights:", error.message);
@@ -288,13 +334,17 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
 
   // A letter to me just landed: RLS lets me read it now, but it's older
   // than the resync cursor (created at send time), so fetch it by id.
+  // Only letters that landed inside the loaded window — earlier ones are
+  // part of history that isn't loaded yet.
   useEffect(() => {
     const known = new Set(messagesRef.current.map((m) => m.id));
+    const windowStart = oldestLoadedAt ? Date.parse(oldestLoadedAt) : null;
     const landed = Object.values(flights)
       .filter(
         (f) =>
           f.status === "delivered" &&
           f.sender_id !== currentUserId &&
+          (windowStart === null || (f.arrival_time !== null && Date.parse(f.arrival_time) >= windowStart)) &&
           !known.has(f.message_id) &&
           !requestedLandedLetterIds.current.has(f.message_id)
       )
@@ -319,7 +369,64 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
           return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
       });
-  }, [currentUserId, flights]);
+  }, [currentUserId, flights, oldestLoadedAt]);
+
+  // Next older page of history, triggered by scrolling near the top.
+  const loadOlder = useCallback(async () => {
+    const before = oldestLoadedAtRef.current;
+    if (!before || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("chat_id", chatId)
+        .lt("created_at", before)
+        .order("created_at", { ascending: false })
+        .limit(CHAT_PAGE_SIZE + 1);
+      if (error) {
+        if (isSessionExpiredError(error)) redirectToLoginForExpiredSession();
+        return;
+      }
+      const page = (data ?? []).slice(0, CHAT_PAGE_SIZE).reverse();
+      setHasOlder((data ?? []).length > CHAT_PAGE_SIZE);
+      if (page.length === 0) return;
+
+      const windowStart = page[0].created_at;
+      // Flights that landed inside the newly loaded stretch (older than the
+      // previous window, so fetchFlights never asked for them).
+      const flightsResult = await supabase
+        .from("pigeon_flights")
+        .select(FLIGHT_COLUMNS)
+        .eq("chat_id", chatId)
+        .gte("arrival_time", windowStart)
+        .lt("arrival_time", before);
+      if (!flightsResult.error) mergeFlights((flightsResult.data ?? []) as unknown as FlightRow[]);
+
+      scrollHeightBeforePrependRef.current = scrollRef.current?.scrollHeight ?? null;
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        const fresh = page.filter((m) => !known.has(m.id));
+        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+      });
+      setOldestLoadedAt(windowStart);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [chatId, mergeFlights]);
+
+  // Keep the message the user was looking at in place when older ones get
+  // prepended above it.
+  useLayoutEffect(() => {
+    const previousHeight = scrollHeightBeforePrependRef.current;
+    const el = scrollRef.current;
+    if (previousHeight === null || !el) return;
+    scrollHeightBeforePrependRef.current = null;
+    el.scrollTop += el.scrollHeight - previousHeight;
+  }, [messages]);
 
   // ONE realtime channel for the whole chat: new messages (RLS only
   // delivers what I may read — so no in-flight letters to me) and every
@@ -391,16 +498,29 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
 
   // Both buckets are private, so image_url/audio_url only ever hold a
   // storage path ("{chatId}/{messageId}.ext"). Resolve them to signed URLs
-  // in one batched request per bucket and cache by path. Failures are
-  // surfaced via attachmentLoadErrors (with a manual retry in the UI)
-  // instead of failing silently.
+  // — reused from lib/chat/signed-url-cache.ts while still valid, so the
+  // browser cache can serve the files — and sign the rest in one batched
+  // request per bucket. Failures are surfaced via attachmentLoadErrors
+  // (with a manual retry in the UI) instead of failing silently.
   const fetchSignedUrls = useCallback(async (refs: StorageRef[]) => {
     const uniqueRefs = Array.from(new Map(refs.map((r) => [r.path, r])).values());
-    const toFetch = uniqueRefs.filter(
+    const pending = uniqueRefs.filter(
       (r) => !requestedSignedUrlPaths.current.has(r.path)
     );
+    if (pending.length === 0) return;
+    pending.forEach((r) => requestedSignedUrlPaths.current.add(r.path));
+
+    const cached: Record<string, string> = {};
+    const toFetch: StorageRef[] = [];
+    for (const r of pending) {
+      const url = getCachedSignedUrl(currentUserId, r.path);
+      if (url) cached[r.path] = url;
+      else toFetch.push(r);
+    }
+    if (Object.keys(cached).length > 0) {
+      setSignedUrls((prev) => ({ ...prev, ...cached }));
+    }
     if (toFetch.length === 0) return;
-    toFetch.forEach((r) => requestedSignedUrlPaths.current.add(r.path));
 
     const supabase = createClient();
     await supabase.auth.getSession();
@@ -433,6 +553,10 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
       })
     );
 
+    cacheSignedUrls(
+      currentUserId,
+      results.flatMap((r) => (r.url ? [{ path: r.path, url: r.url }] : []))
+    );
     setSignedUrls((prev) => {
       const next = { ...prev };
       for (const r of results) if (r.url) next[r.path] = r.url;
@@ -451,12 +575,13 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
     results.forEach((r) => {
       if (!r.url) requestedSignedUrlPaths.current.delete(r.path);
     });
-  }, []);
+  }, [currentUserId]);
 
   // A signed URL that stops working (expired after SIGNED_URL_TTL_SECONDS
   // in a long-open tab) — drop it and fetch a fresh one.
   const refreshSignedUrl = useCallback(
     (ref: StorageRef) => {
+      forgetSignedUrl(currentUserId, ref.path);
       setSignedUrls((prev) => {
         if (!prev[ref.path]) return prev;
         const next = { ...prev };
@@ -466,7 +591,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
       requestedSignedUrlPaths.current.delete(ref.path);
       void fetchSignedUrls([ref]);
     },
-    [fetchSignedUrls]
+    [currentUserId, fetchSignedUrls]
   );
 
   useEffect(() => {
@@ -522,6 +647,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     isAtBottomRef.current = distanceFromBottom < BOTTOM_THRESHOLD_PX;
+    if (el.scrollTop < LOAD_OLDER_THRESHOLD_PX && hasOlder) void loadOlder();
   }
 
   function handleMediaLoaded() {
@@ -715,7 +841,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
   function submitMessage() {
     const text = draft.trim();
     const attachmentToSend = attachment;
-    if ((!text && !attachmentToSend) || sending) return;
+    if (!text && !attachmentToSend) return;
     const kind = mode;
 
     // First thing, while still inside the submit gesture (iOS only allows
@@ -758,10 +884,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
 
     if (kind === "chat") {
       // Instant chat: the message goes out right away in the background
-      // (the recipient has it immediately); the sender watches the hacker
-      // show meanwhile, which can be tapped away.
-      setSending(true);
-      setShowEncryption(true);
+      // (the recipient has it immediately); the sender sees the hacker
+      // show play where the bubble sits, which can be tapped away.
+      setEncryptingIds((prev) => new Set(prev).add(id));
       void performSend(id, text || null, attachmentToSend, "chat");
       return;
     }
@@ -789,10 +914,14 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
     }
   }
 
-  function handleEncryptionComplete() {
-    setShowEncryption(false);
-    setSending(false);
-  }
+  const handleEncryptionComplete = useCallback((id: string) => {
+    setEncryptingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
   function retrySend(message: DisplayMessage) {
     void performSend(message.id, message.content, message.pendingAttachment ?? null, message.kind).then(
@@ -833,8 +962,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
         ? `text-white ${ownBubbleStyle ? "" : "bg-neutral-900 dark:bg-night-bubble"}`
         : "bg-neutral-100 text-neutral-900 dark:bg-night-raised dark:text-night-text";
 
-    return (
-      <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+    // A failed send drops the show right away so the retry button shows.
+    const isEncrypting = encryptingIds.has(message.id) && !hasError;
+    const bubble = (
         <div
           style={!isLetter && isOwn ? ownBubbleStyle : undefined}
           className={`max-w-[80%] space-y-1 break-words rounded-2xl px-3 py-2 text-sm sm:max-w-[75%] ${bubbleClass} ${
@@ -959,6 +1089,39 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
             />
           )}
         </div>
+    );
+
+    return (
+      <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+        {isOwn && !isLetter ? (
+          <AnimatePresence mode="wait" initial={false}>
+            {isEncrypting ? (
+              <motion.div
+                key="encrypting"
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.2 }}
+                className="flex w-full justify-end"
+              >
+                <div className="max-w-[80%] sm:max-w-[75%]">
+                  <EncryptionSequence onComplete={() => handleEncryptionComplete(message.id)} />
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="bubble"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.2 }}
+                onAnimationComplete={handleMediaLoaded}
+                className="flex w-full justify-end"
+              >
+                {bubble}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        ) : (
+          bubble
+        )}
       </div>
     );
   }
@@ -993,6 +1156,18 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
         onScroll={handleScroll}
         className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4"
       >
+        {hasOlder && (
+          <div className="flex justify-center py-1">
+            <button
+              type="button"
+              onClick={() => void loadOlder()}
+              disabled={loadingOlder}
+              className="rounded-full px-3 py-1 text-xs text-neutral-400 hover:bg-neutral-100 disabled:hover:bg-transparent dark:text-night-muted dark:hover:bg-night-raised"
+            >
+              {loadingOlder ? "Ältere Nachrichten werden geladen…" : "Ältere Nachrichten laden"}
+            </button>
+          </div>
+        )}
         {timeline.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-neutral-400 dark:text-night-muted">
             <span className="text-3xl">🕊️</span>
@@ -1155,7 +1330,6 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
           {hasSendableContent ? (
             <button
               type="submit"
-              disabled={sending}
               style={!isLetterMode ? ownBubbleStyle : undefined}
               className={`flex-shrink-0 rounded-full px-4 py-2 text-sm text-white disabled:opacity-50 ${
                 isLetterMode
@@ -1169,7 +1343,6 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
             </button>
           ) : (
             <VoiceRecorderButton
-              disabled={sending}
               onRecorded={handleVoiceRecorded}
               onError={setMicError}
             />
@@ -1177,7 +1350,6 @@ export function ChatRoom({ chatId, me, partner, initialMessages }: ChatRoomProps
         </form>
       </div>
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={closeLightbox} />}
-      <EncryptionSequence active={showEncryption} onComplete={handleEncryptionComplete} />
       <AnimatePresence>
         {openFlightMessageId && (
           <PigeonFlightMap

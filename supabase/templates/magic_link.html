@@ -1,0 +1,55 @@
+<!-- Supabase Auth → Email Templates → "Magic Link"
+     Betreff: Dein Anmeldelink für Encrypted Pigeon
+     Ausgelöst von: src/app/login/actions.ts (signInWithOtp) -->
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light only" />
+    <title>Anmeldelink für Encrypted Pigeon</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f7f0df;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f7f0df;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px; background-color:#ffffff; border:1px solid #e6dcc4; border-radius:12px;">
+            <tr>
+              <td style="padding:32px 32px 8px 32px; font-family:Arial, Helvetica, sans-serif; color:#5c4a37; font-size:14px; font-weight:bold; letter-spacing:0.5px;">
+                🕊️ Encrypted Pigeon
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 32px 0 32px; font-family:Arial, Helvetica, sans-serif; color:#171717;">
+                <h1 style="margin:0 0 16px 0; font-size:22px; line-height:1.3; font-weight:bold;">Hier ist dein Anmeldelink</h1>
+                <p style="margin:0 0 16px 0; font-size:16px; line-height:1.5;">
+                  Hallo,<br />
+                  du hast gerade einen Anmeldelink für <strong>Encrypted Pigeon</strong> angefordert. Klick auf den Button, um dich anzumelden.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:8px 32px 24px 32px;">
+                <a href="{{ .ConfirmationURL }}" style="display:inline-block; padding:14px 28px; background-color:#c1643a; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; text-decoration:none; border-radius:8px;">Jetzt anmelden</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px 32px; font-family:Arial, Helvetica, sans-serif; color:#5c4a37; font-size:13px; line-height:1.5;">
+                <p style="margin:0 0 12px 0;">Der Link funktioniert nur einmal und läuft nach kurzer Zeit ab.</p>
+                <p style="margin:0 0 4px 0;">Button funktioniert nicht? Diesen Link in den Browser kopieren:</p>
+                <p style="margin:0; word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#c1643a;">{{ .ConfirmationURL }}</a></p>
+              </td>
+            </tr>
+          </table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
+            <tr>
+              <td style="padding:16px 32px; font-family:Arial, Helvetica, sans-serif; color:#8a7a62; font-size:12px; line-height:1.5; text-align:center;">
+                Du hast keinen Link angefordert? Dann ignoriere diese E-Mail einfach – dein Konto bleibt sicher.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

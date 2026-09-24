@@ -15,7 +15,13 @@ import { completeAuthCallback } from "./actions";
  *   implicit-flow `#access_token=...&refresh_token=...` in the URL hash.
  *
  * Fragments never reach the server, so this has to run client-side.
+ *
+ * Invite and password-reset links (`type=invite` / `type=recovery`) sign
+ * the person in without a password they know — those continue to
+ * /auth/set-password to choose one before entering the app.
  */
+const SET_PASSWORD_LINK_TYPES = new Set(["invite", "recovery"]);
+
 function readAuthParams(search: URLSearchParams) {
   const hash = typeof window !== "undefined" ? window.location.hash.substring(1) : "";
   const fromHash = new URLSearchParams(hash);
@@ -27,6 +33,7 @@ function readAuthParams(search: URLSearchParams) {
     code: search.get("code"),
     accessToken: fromHash.get("access_token"),
     refreshToken: fromHash.get("refresh_token"),
+    type: pick("type"),
   };
 }
 
@@ -65,7 +72,9 @@ export function AuthCallbackHandler() {
         return;
       }
 
-      await completeAuthCallback();
+      await completeAuthCallback({
+        setPassword: SET_PASSWORD_LINK_TYPES.has(params.type ?? ""),
+      });
     }
 
     run();

@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { PwaInstallPrompt } from "@/components/pwa/pwa-install-prompt";
+import { AuthHashForwarder } from "@/components/auth/auth-hash-forwarder";
 import { THEME_COOKIE, parseTheme, themeClass } from "@/lib/theme";
 
 const geistSans = localFont({
@@ -87,6 +88,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <AuthHashForwarder />
         {children}
         <PwaInstallPrompt />
       </body>

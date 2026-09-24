@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, MessageKind } from "@/lib/supabase/types";
 import { MEMBER_PROFILE_COLUMNS, type MemberProfile } from "@/lib/profile";
+import { sortByActivity } from "@/lib/chat/chat-list-store";
 
 type PigeonClient = SupabaseClient<Database, "pigeon">;
 
@@ -13,8 +14,8 @@ export interface ChatListItem {
     createdAt: string;
     fromMe: boolean;
   } | null;
-  /** A pigeon letter to me is still in the air in this chat. */
-  incomingPigeon: boolean;
+  /** message_ids of pigeon letters to me still in the air in this chat. */
+  incomingLetterIds: string[];
 }
 
 export interface ChatOverview {
@@ -24,11 +25,7 @@ export interface ChatOverview {
   membersWithoutChat: MemberProfile[];
 }
 
-// Enough recent rows to find the latest message of every chat in a small
-// friend group without one query per chat.
-const RECENT_MESSAGES_LIMIT = 300;
-
-function previewOf(m: { content: string | null; image_url: string | null; audio_url: string | null }) {
+export function previewOf(m: { content: string | null; image_url: string | null; audio_url: string | null }) {
   if (m.content) return m.content;
   if (m.image_url) return "📷 Bild";
   if (m.audio_url) return "🎤 Sprachnachricht";
@@ -59,27 +56,25 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
     };
   }
 
-  const [{ data: otherRows }, { data: recentMessages }, { data: openFlights }] = await Promise.all([
+  const [{ data: otherRows }, { data: latestMessages }, { data: openFlights }] = await Promise.all([
     supabase.from("chat_participants").select("chat_id, user_id").in("chat_id", chatIds).neq("user_id", userId),
-    supabase
-      .from("messages")
-      .select("chat_id, sender_id, kind, content, image_url, audio_url, created_at")
-      .in("chat_id", chatIds)
-      .order("created_at", { ascending: false })
-      .limit(RECENT_MESSAGES_LIMIT),
+    // Exactly one row per chat (RLS-aware SQL function, see
+    // supabase/migrations/20260924030000_latest_message_per_chat.sql).
+    supabase.rpc("latest_messages_for_chats", { p_chat_ids: chatIds }),
     supabase
       .from("pigeon_flights")
-      .select("chat_id, sender_id")
+      .select("chat_id, message_id")
       .in("chat_id", chatIds)
       .neq("status", "delivered")
       .neq("sender_id", userId),
   ]);
 
-  const lastByChat = new Map<string, NonNullable<typeof recentMessages>[number]>();
-  for (const m of recentMessages ?? []) {
-    if (!lastByChat.has(m.chat_id)) lastByChat.set(m.chat_id, m);
+  const lastByChat = new Map((latestMessages ?? []).map((m) => [m.chat_id, m]));
+  const incomingByChat = new Map<string, string[]>();
+  for (const f of openFlights ?? []) {
+    if (!f.chat_id) continue;
+    incomingByChat.set(f.chat_id, [...(incomingByChat.get(f.chat_id) ?? []), f.message_id]);
   }
-  const chatsWithIncoming = new Set((openFlights ?? []).map((f) => f.chat_id));
 
   const chats: ChatListItem[] = [];
   const partnersWithChat = new Set<string>();
@@ -99,20 +94,13 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
             fromMe: last.sender_id === userId,
           }
         : null,
-      incomingPigeon: chatsWithIncoming.has(row.chat_id),
+      incomingLetterIds: incomingByChat.get(row.chat_id) ?? [],
     });
   }
-
-  // Most recent activity first; chats without messages at the end.
-  chats.sort((a, b) => {
-    const at = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0;
-    const bt = b.lastMessage ? Date.parse(b.lastMessage.createdAt) : 0;
-    return bt - at;
-  });
 
   const membersWithoutChat = Array.from(profileById.values()).filter(
     (p) => p.id !== userId && !partnersWithChat.has(p.id)
   );
 
-  return { me, chats, membersWithoutChat };
+  return { me, chats: sortByActivity(chats), membersWithoutChat };
 }

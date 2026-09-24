@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   TRANSMIT_LINES,
   MID_SEQUENCE_LINES,
@@ -10,9 +10,8 @@ import {
 import { playEncryptEnd, preloadChimeSounds } from "@/lib/chat/chime-sounds";
 
 interface EncryptionSequenceProps {
-  /** Show the overlay and (re-)run a fresh randomized sequence. */
-  active: boolean;
-  /** Fires once the full sequence (lines + closing pause) has played out. */
+  /** Fires once the full sequence (lines + closing pause) has played out,
+   * or right away when the terminal is tapped. */
   onComplete: () => void;
 }
 
@@ -76,12 +75,22 @@ function lineColorClass(kind: EncryptionLineTemplate["kind"]) {
   }
 }
 
-export function EncryptionSequence({ active, onComplete }: EncryptionSequenceProps) {
-  const [lines, setLines] = useState<EncryptionLineTemplate[]>([]);
+// Only the newest few lines stay visible so the in-chat terminal keeps a
+// fixed, bubble-sized height instead of growing the conversation.
+const VISIBLE_LINE_COUNT = 4;
+
+/**
+ * The "hacker" show for one instant chat message, rendered in the chat
+ * right where that message sits — the rest of the chat stays usable, and
+ * several messages can each run their own sequence at the same time.
+ * Starts a fresh randomized sequence on mount.
+ */
+export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
+  const [lines] = useState(pickSequence);
   const [revealedCount, setRevealedCount] = useState(0);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  // Set by the running sequence; tapping the overlay ends it early (the
+  // Set by the running sequence; tapping the terminal ends it early (the
   // message itself was already sent in the background either way).
   const skipRef = useRef<(() => void) | null>(null);
 
@@ -90,17 +99,8 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
   }, []);
 
   useEffect(() => {
-    if (!active) {
-      setRevealedCount(0);
-      return;
-    }
-
-    const chosen = pickSequence();
-    setLines(chosen);
-    setRevealedCount(0);
     // The start chime is played by the send handler itself (see
     // lib/chat/chime-sounds.ts for why it can't happen here on iOS).
-
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -108,10 +108,11 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
       if (cancelled) return;
       setRevealedCount(index + 1);
 
-      if (index + 1 >= chosen.length) {
+      if (index + 1 >= lines.length) {
         timers.push(
           setTimeout(() => {
             if (cancelled) return;
+            cancelled = true;
             playEncryptEnd();
             onCompleteRef.current();
           }, FINAL_PAUSE_MS)
@@ -120,13 +121,13 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
       }
 
       const delay =
-        chosen[index].kind === "progress"
+        lines[index].kind === "progress"
           ? PROGRESS_LINE_DELAY_MS
           : LINE_DELAY_MS + Math.random() * LINE_DELAY_JITTER_MS;
       timers.push(setTimeout(() => showLine(index + 1), delay));
     }
 
-    timers.push(setTimeout(() => showLine(0), 300));
+    timers.push(setTimeout(() => showLine(0), 200));
 
     skipRef.current = () => {
       if (cancelled) return;
@@ -140,65 +141,53 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
       timers.forEach(clearTimeout);
       skipRef.current = null;
     };
-    // Re-running this effect on every render would restart the sequence
-    // mid-animation; only `active` flipping should.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+  }, [lines]);
 
+  const firstVisible = Math.max(0, revealedCount - VISIBLE_LINE_COUNT);
   const visibleLines = useMemo(
-    () => lines.slice(0, revealedCount),
-    [lines, revealedCount]
+    () => lines.slice(firstVisible, revealedCount),
+    [lines, firstVisible, revealedCount]
   );
 
   return (
-    <AnimatePresence>
-      {active && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.4, ease: "easeInOut" }}
-          onClick={() => skipRef.current?.()}
-          role="status"
-          aria-label="Nachricht wird verschlüsselt — tippen zum Überspringen"
-          className="encryption-flicker fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-6"
-        >
-          <div className="encryption-scanlines relative w-full max-w-lg overflow-hidden rounded-lg border border-green-900/60 bg-black p-5 font-mono text-sm shadow-[0_0_40px_rgba(0,255,140,0.08)]">
-            <div className="mb-3 flex items-center gap-2 border-b border-green-900/60 pb-2 text-xs text-green-600">
-              <span className="h-2 w-2 rounded-full bg-green-500" />
-              PIGEON_SECURE_CHANNEL v3.0
-            </div>
-            <div className="space-y-1.5">
-              {visibleLines.map((line, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25 }}
-                  className={`whitespace-pre-wrap ${lineColorClass(line.kind)} ${
-                    line.kind === "warning" ? "encryption-glitch" : ""
-                  }`}
-                >
-                  {line.kind === "progress" ? (
-                    <>
-                      <div>{`> ${line.text}`}</div>
-                      <AsciiProgressBar durationMs={PROGRESS_LINE_DELAY_MS - 100} />
-                    </>
-                  ) : (
-                    line.text
-                  )}
-                </motion.div>
-              ))}
-              <motion.span
-                animate={{ opacity: [1, 0, 1] }}
-                transition={{ duration: 1, repeat: Infinity }}
-                className="inline-block h-3.5 w-2 bg-green-500 align-middle"
-              />
-            </div>
-          </div>
-          <p className="font-mono text-[11px] text-green-800">[ tippen zum Überspringen ]</p>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <button
+      type="button"
+      onClick={() => skipRef.current?.()}
+      aria-label="Nachricht wird verschlüsselt — tippen zum Überspringen"
+      className="encryption-scanlines relative block w-72 max-w-full cursor-pointer overflow-hidden rounded-2xl border border-green-900/60 bg-black px-3 py-2 text-left font-mono text-[11px] leading-snug shadow-[0_0_24px_rgba(0,255,140,0.08)]"
+    >
+      <div className="mb-1.5 flex items-center gap-1.5 border-b border-green-900/60 pb-1 text-[10px] text-green-600">
+        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+        PIGEON_SECURE_CHANNEL v3.0
+      </div>
+      {/* Fixed height: 4 lines, a progress line takes two. */}
+      <div role="status" className="flex h-[6.5rem] flex-col justify-end gap-1 overflow-hidden">
+        {visibleLines.map((line, offset) => (
+          <motion.div
+            key={firstVisible + offset}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className={`whitespace-pre-wrap ${lineColorClass(line.kind)} ${
+              line.kind === "warning" ? "encryption-glitch" : ""
+            }`}
+          >
+            {line.kind === "progress" ? (
+              <>
+                <div className="truncate">{`> ${line.text}`}</div>
+                <AsciiProgressBar durationMs={PROGRESS_LINE_DELAY_MS - 100} />
+              </>
+            ) : (
+              line.text
+            )}
+          </motion.div>
+        ))}
+        <motion.span
+          animate={{ opacity: [1, 0, 1] }}
+          transition={{ duration: 1, repeat: Infinity }}
+          className="inline-block h-3 w-1.5 flex-shrink-0 bg-green-500"
+        />
+      </div>
+    </button>
   );
 }

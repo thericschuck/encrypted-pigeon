@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail } from "@/lib/auth/admin-email";
+import { authCallbackUrl } from "@/lib/site-url";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
 import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
 
@@ -49,7 +50,7 @@ export async function inviteUser(
   }
 
   const admin = createAdminClient();
-  const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`;
+  const redirectTo = await authCallbackUrl();
 
   // The invite list is what makes someone a member (lib/auth/bootstrap.ts);
   // record it before sending, so the link works the moment it arrives.

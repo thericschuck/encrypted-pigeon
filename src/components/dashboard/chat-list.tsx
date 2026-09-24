@@ -82,7 +82,7 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                         )}
                       </div>
                       <p className="truncate text-xs text-neutral-500 dark:text-night-muted">
-                        {chat.incomingPigeon ? (
+                        {chat.incomingLetterIds.length > 0 ? (
                           <span className="font-medium text-[#b0532b] dark:text-night-accent">
                             🕊️ Eine Taube ist zu dir unterwegs…
                           </span>

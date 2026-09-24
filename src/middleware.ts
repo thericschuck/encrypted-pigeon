@@ -50,10 +50,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  // getClaims() refreshes an expiring session (writing the new cookies via
+  // setAll above) and then verifies the access token locally against the
+  // project's cached JWKS (asymmetric ES256 keys) — no Auth-server round
+  // trip on every request, unlike getUser().
+  const { data, error } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? { id: data.claims.sub } : null;
 
   // Supabase unreachable (flaky network): that says nothing about whether
   // the user is signed in, so don't bounce them to /login — let the page
