@@ -2,8 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ensureProfileAndHomeChat } from "@/lib/auth/bootstrap";
-import { isAdminEmail } from "@/lib/auth/admin-email";
+import { ensureMembership, type MembershipResult } from "@/lib/auth/bootstrap";
 
 /**
  * Runs after auth-callback-handler.tsx has established a session client-side
@@ -21,18 +20,23 @@ export async function completeAuthCallback() {
     redirect("/login?error=auth_failed");
   }
 
-  const authedUser = { id: user.id, email: user.email };
-
-  if (isAdminEmail(authedUser.email)) {
-    await ensureProfileAndHomeChat(authedUser);
-    redirect("/admin/invite");
+  // redirect() throws, so it must stay outside the try.
+  let membership: MembershipResult | null = null;
+  try {
+    membership = await ensureMembership({ id: user.id, email: user.email });
+  } catch (error) {
+    console.error("Membership check failed:", error);
+  }
+  if (!membership) {
+    redirect("/login?error=network");
   }
 
-  const { chatId } = await ensureProfileAndHomeChat(authedUser);
-
-  if (!chatId) {
-    redirect("/login?error=no_chat");
+  if (membership.status === "not_invited") {
+    await supabase.auth.signOut();
+    redirect("/login?error=not_invited");
   }
 
-  redirect(`/chat/${chatId}`);
+  // A freshly invited friend lands straight in the chat with whoever
+  // invited them; everyone else on the dashboard.
+  redirect(membership.homeChatId ? `/chat/${membership.homeChatId}` : "/");
 }

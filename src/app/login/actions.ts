@@ -1,9 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { ensureProfileAndHomeChat } from "@/lib/auth/bootstrap";
-import { isAdminEmail } from "@/lib/auth/admin-email";
+import { ensureMembership } from "@/lib/auth/bootstrap";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
+import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
+
+const NOT_INVITED_MESSAGE =
+  "Für diese E-Mail gibt es keine Einladung. Frag die Person, die Encrypted Pigeon betreibt.";
 
 export async function sendMagicLink(
   _prevState: MagicLinkState,
@@ -20,10 +23,18 @@ export async function sendMagicLink(
     email,
     options: {
       emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      // Never create accounts from the public login page — new people only
+      // come in through an invite (admin dashboard).
+      shouldCreateUser: false,
     },
   });
 
   if (error) {
+    if (isNetworkError(error)) return { status: "error", message: NETWORK_ERROR_MESSAGE };
+    // GoTrue's wording for "no such user" with shouldCreateUser: false.
+    if (/signups not allowed|user not found/i.test(error.message)) {
+      return { status: "error", message: NOT_INVITED_MESSAGE };
+    }
     return { status: "error", message: error.message };
   }
 
@@ -50,6 +61,10 @@ export async function signInWithPassword(
     password,
   });
 
+  if (error && isNetworkError(error)) {
+    return { status: "error", message: NETWORK_ERROR_MESSAGE };
+  }
+
   if (error || !data.user?.email) {
     return {
       status: "error",
@@ -57,21 +72,27 @@ export async function signInWithPassword(
     };
   }
 
-  const user = { id: data.user.id, email: data.user.email };
+  let membership;
+  try {
+    membership = await ensureMembership({ id: data.user.id, email: data.user.email });
+  } catch (bootstrapError) {
+    console.error("Membership check failed:", bootstrapError);
+    return {
+      status: "error",
+      message: isNetworkError(bootstrapError)
+        ? NETWORK_ERROR_MESSAGE
+        : "Anmeldung fehlgeschlagen. Bitte nochmal versuchen.",
+    };
+  }
+  if (membership.status === "not_invited") {
+    await supabase.auth.signOut();
+    return { status: "error", message: NOT_INVITED_MESSAGE };
+  }
 
   // Redirecting via client-side router.push() (see PasswordLoginForm)
   // instead of calling next/navigation's redirect() here works around a
   // Next.js bug where a useFormState-bound action that redirects can leave
   // `state` undefined on the next render:
   // https://github.com/vercel/next.js/issues/68549
-  if (isAdminEmail(user.email)) {
-    await ensureProfileAndHomeChat(user);
-    return { status: "redirect", message: "", redirectTo: "/admin/invite" };
-  }
-
-  const { chatId } = await ensureProfileAndHomeChat(user);
-  if (!chatId) {
-    return { status: "error", message: "Kein Chat gefunden." };
-  }
-  return { status: "redirect", message: "", redirectTo: `/chat/${chatId}` };
+  return { status: "redirect", message: "", redirectTo: "/" };
 }

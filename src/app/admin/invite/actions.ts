@@ -1,9 +1,15 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
+import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
+
+function errorMessage(error: { message: string }): string {
+  return isNetworkError(error) ? NETWORK_ERROR_MESSAGE : error.message;
+}
 
 /**
  * Uses the service-role admin client (plain @supabase/supabase-js, not
@@ -37,7 +43,7 @@ export async function inviteUser(
     return { status: "error", message: "Nicht berechtigt." };
   }
 
-  const email = String(formData.get("email") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email) {
     return { status: "error", message: "Bitte eine E-Mail-Adresse eingeben." };
   }
@@ -45,16 +51,26 @@ export async function inviteUser(
   const admin = createAdminClient();
   const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`;
 
+  // The invite list is what makes someone a member (lib/auth/bootstrap.ts);
+  // record it before sending, so the link works the moment it arrives.
+  const { error: inviteError } = await admin
+    .from("invites")
+    .upsert({ email, invited_by: user!.id }, { onConflict: "email", ignoreDuplicates: true });
+  if (inviteError) {
+    return { status: "error", message: errorMessage(inviteError) };
+  }
+
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
   });
 
   if (!error) {
+    revalidatePath("/");
     return { status: "sent", message: `Einladung an ${email} verschickt.` };
   }
 
   if (!error.message.toLowerCase().includes("already been registered")) {
-    return { status: "error", message: error.message };
+    return { status: "error", message: errorMessage(error) };
   }
 
   // Already has an account (e.g. an earlier invite they never opened) — fall
@@ -65,9 +81,10 @@ export async function inviteUser(
   });
 
   if (resendError) {
-    return { status: "error", message: resendError.message };
+    return { status: "error", message: errorMessage(resendError) };
   }
 
+  revalidatePath("/");
   return {
     status: "sent",
     message: `${email} hat schon einen Account — neuen Anmeldelink verschickt.`,

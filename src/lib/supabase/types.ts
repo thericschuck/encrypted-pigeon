@@ -1,4 +1,4 @@
-// Hand-written types matching supabase/migrations/20260920000000_init_schema.sql.
+// Hand-written types matching supabase/migrations/ (init schema + later migrations).
 // Replace with `supabase gen types typescript` output once the project is linked.
 //
 // Every table needs `Relationships` and every schema needs `Views`/`Functions`
@@ -8,6 +8,8 @@
 // `never` with no error at the call site, only at every usage downstream.
 
 export type PigeonFlightStatus = "encrypting" | "in_transit" | "delivered";
+export type MessageKind = "chat" | "pigeon";
+export type ThemePreference = "system" | "light" | "dark";
 
 export interface Database {
   pigeon: {
@@ -17,7 +19,11 @@ export interface Database {
           id: string;
           email: string;
           display_name: string | null;
+          // Path inside the pigeon-avatars bucket ("{id}/{file}"), not a URL.
           avatar_url: string | null;
+          theme: ThemePreference;
+          accent_color: string | null;
+          pigeon_name: string | null;
           created_at: string;
         };
         Insert: {
@@ -25,6 +31,9 @@ export interface Database {
           email: string;
           display_name?: string | null;
           avatar_url?: string | null;
+          theme?: ThemePreference;
+          accent_color?: string | null;
+          pigeon_name?: string | null;
           created_at?: string;
         };
         Update: {
@@ -32,6 +41,9 @@ export interface Database {
           email?: string;
           display_name?: string | null;
           avatar_url?: string | null;
+          theme?: ThemePreference;
+          accent_color?: string | null;
+          pigeon_name?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -78,6 +90,7 @@ export interface Database {
           image_url: string | null;
           audio_url: string | null;
           audio_duration_seconds: number | null;
+          kind: MessageKind;
           created_at: string;
         };
         Insert: {
@@ -88,6 +101,7 @@ export interface Database {
           image_url?: string | null;
           audio_url?: string | null;
           audio_duration_seconds?: number | null;
+          kind?: MessageKind;
           created_at?: string;
         };
         Update: {
@@ -98,6 +112,7 @@ export interface Database {
           image_url?: string | null;
           audio_url?: string | null;
           audio_duration_seconds?: number | null;
+          kind?: MessageKind;
           created_at?: string;
         };
         Relationships: [];
@@ -106,31 +121,88 @@ export interface Database {
         Row: {
           id: string;
           message_id: string;
+          chat_id: string | null;
+          sender_id: string | null;
           departure_time: string | null;
           arrival_time: string | null;
           duration_seconds: number | null;
           events: unknown;
           status: PigeonFlightStatus;
+          incident_notified_at: string | null;
+          notified_incident_event: unknown;
           created_at: string;
         };
         Insert: {
           id?: string;
           message_id: string;
+          chat_id?: string | null;
+          sender_id?: string | null;
           departure_time?: string | null;
           arrival_time?: string | null;
           duration_seconds?: number | null;
           events?: unknown;
           status?: PigeonFlightStatus;
+          incident_notified_at?: string | null;
+          notified_incident_event?: unknown;
           created_at?: string;
         };
         Update: {
           id?: string;
           message_id?: string;
+          chat_id?: string | null;
+          sender_id?: string | null;
           departure_time?: string | null;
           arrival_time?: string | null;
           duration_seconds?: number | null;
           events?: unknown;
           status?: PigeonFlightStatus;
+          incident_notified_at?: string | null;
+          notified_incident_event?: unknown;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      invites: {
+        Row: {
+          email: string;
+          invited_by: string | null;
+          created_at: string;
+          accepted_at: string | null;
+        };
+        Insert: {
+          email: string;
+          invited_by?: string | null;
+          created_at?: string;
+          accepted_at?: string | null;
+        };
+        Update: {
+          email?: string;
+          invited_by?: string | null;
+          created_at?: string;
+          accepted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          endpoint: string;
+          keys: unknown;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          endpoint: string;
+          keys: unknown;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          endpoint?: string;
+          keys?: unknown;
           created_at?: string;
         };
         Relationships: [];

@@ -7,6 +7,8 @@ interface VoiceMessagePlayerProps {
   durationSeconds?: number | null;
   // "own" = white-on-dark bubble, "other" = dark-on-light bubble/composer.
   variant?: "own" | "other";
+  /** Fired when the source fails to load (e.g. an expired signed URL). */
+  onError?: () => void;
 }
 
 function formatDuration(seconds: number) {
@@ -20,6 +22,7 @@ export function VoiceMessagePlayer({
   src,
   durationSeconds,
   variant = "other",
+  onError,
 }: VoiceMessagePlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -72,18 +75,31 @@ export function VoiceMessagePlayer({
   }
 
   const isOwn = variant === "own";
-  const accent = isOwn ? "#ffffff" : "#171717";
+  // "other" accent follows the color scheme (dark text on light bubble,
+  // light text on dark bubble); CSS var so it can switch without JS.
+  const accent = isOwn ? "#ffffff" : "var(--foreground)";
 
   return (
     <div className="flex w-full min-w-[180px] items-center gap-2">
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        className="hidden"
+        onError={() => {
+          setIsPlaying(false);
+          onError?.();
+        }}
+      />
       <button
         type="button"
         onClick={togglePlay}
         aria-label={isPlaying ? "Pause" : "Abspielen"}
         className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
-          isOwn ? "bg-white/15 text-white" : "bg-neutral-200 text-neutral-900"
+          isOwn
+            ? "bg-white/15 text-white"
+            : "bg-neutral-200 text-neutral-900 dark:bg-night-border dark:text-night-text"
         }`}
       >
         {isPlaying ? (

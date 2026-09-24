@@ -2,32 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { createClient } from "@/lib/supabase/client";
+import type { FlightRow } from "@/lib/chat/flights";
 import { describePigeonEvent } from "@/lib/chat/pigeon-event-descriptions";
-import { DecryptionSequence } from "@/components/chat/decryption-sequence";
-
-interface FlightEvent {
-  type: string;
-  label: string;
-  emoji: string;
-  timestamp_offset_seconds: number;
-  duration_impact_seconds: number;
-}
-
-interface FlightRow {
-  id: string;
-  message_id: string;
-  departure_time: string | null;
-  arrival_time: string | null;
-  duration_seconds: number | null;
-  events: FlightEvent[] | null;
-  status: "encrypting" | "in_transit" | "delivered";
-}
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface PigeonFlightMapProps {
-  messageId: string;
+  /** Kept live by <ChatRoom />'s single pigeon_flights subscription. */
+  flight: FlightRow | undefined;
+  /** True until <ChatRoom />'s initial flight fetch has resolved. */
+  loading: boolean;
   onClose: () => void;
+  /** Shown in the header, e.g. "Gertrud". */
+  pigeonName: string;
+  /** "zu Anna" for my own letter, "von Anna" for an incoming one. */
+  routeLabel: string;
 }
+
+// After a landing observed live: let the pigeon settle, show the
+// "arrived" state briefly, then close so the letter in the chat is visible.
+const LANDING_ANIMATION_MS = 1000;
+const AUTO_CLOSE_AFTER_LANDING_MS = 2600;
 
 // Hand-tuned stylized geography — not accurate, just evocative. All
 // coordinates live in this viewBox.
@@ -100,74 +94,43 @@ function CloudPuff({ x, y }: { x: number; y: number }) {
   );
 }
 
-export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
-  const [flight, setFlight] = useState<FlightRow | null>(null);
+export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLabel }: PigeonFlightMapProps) {
   const [now, setNow] = useState(() => Date.now());
   const [shaking, setShaking] = useState(false);
   const [landing, setLanding] = useState(false);
-  const [view, setView] = useState<"map" | "decrypting">("map");
+  const [justLanded, setJustLanded] = useState(false);
   const pathRef = useRef<SVGPathElement>(null);
   const lastActiveEventKeyRef = useRef<string | null>(null);
   // null until the first status is known, so we can tell "just transitioned
   // to delivered while this was open" apart from "opened an already-old
-  // delivered flight" — only the former gets the landing+decrypt show.
+  // delivered flight" — only the former gets the landing show.
   const prevStatusRef = useRef<FlightRow["status"] | null>(null);
-
-  useEffect(() => {
-    const supabase = createClient();
-    let cancelled = false;
-
-    supabase
-      .from("pigeon_flights")
-      .select("*")
-      .eq("message_id", messageId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled && data) setFlight(data as FlightRow);
-      });
-
-    const channel = supabase
-      .channel(`pigeon-flight-${messageId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "pigeon",
-          table: "pigeon_flights",
-          filter: `message_id=eq.${messageId}`,
-        },
-        (payload) => setFlight(payload.new as FlightRow)
-      )
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, [messageId]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(interval);
   }, []);
 
-  // Landing + decrypt show plays only for a transition observed live (this
-  // map open while status flips in_transit -> delivered). Opening the map
-  // for an already-delivered flight later just shows the resting state.
+  // Landing show plays only for a transition observed live (this map open
+  // while status flips in_transit -> delivered). Opening the map for an
+  // already-delivered flight later just shows the resting state.
+  const flightStatus = flight?.status;
   useEffect(() => {
-    if (!flight) return;
+    if (!flightStatus) return;
     const prevStatus = prevStatusRef.current;
-    prevStatusRef.current = flight.status;
+    prevStatusRef.current = flightStatus;
 
-    if (prevStatus === "in_transit" && flight.status === "delivered") {
+    if (prevStatus === "in_transit" && flightStatus === "delivered") {
       setLanding(true);
-      const landingTimer = setTimeout(() => {
-        setLanding(false);
-        setView("decrypting");
-      }, 1000);
-      return () => clearTimeout(landingTimer);
+      setJustLanded(true);
+      const landingTimer = setTimeout(() => setLanding(false), LANDING_ANIMATION_MS);
+      const closeTimer = setTimeout(onClose, AUTO_CLOSE_AFTER_LANDING_MS);
+      return () => {
+        clearTimeout(landingTimer);
+        clearTimeout(closeTimer);
+      };
     }
-  }, [flight]);
+  }, [flightStatus, onClose]);
 
   const events = useMemo(() => flight?.events ?? [], [flight]);
 
@@ -224,39 +187,60 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
 
   const isReady = departureMs !== null && durationSeconds !== null;
 
+  // Close on Escape, like the image lightbox.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.45, ease: "easeInOut" }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:px-4 sm:py-8"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Taubenflug"
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.97 }}
         transition={{ duration: 0.45, ease: "easeInOut" }}
-        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#d8c9a3] bg-[#f7f0df] shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+        // Phones: bottom sheet up to 92dvh, so the map uses the full width
+        // and the log scrolls below it instead of the card getting clipped
+        // top/bottom. From sm up: the original centered card.
+        className="flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-[#d8c9a3] bg-[#f7f0df] shadow-2xl sm:max-h-full sm:rounded-2xl dark:border-night-border dark:bg-night-surface"
       >
-        <div className="flex items-center justify-between border-b border-[#e0d3ae] px-5 py-3">
-          <div>
-            <h2 className="font-serif text-lg text-[#5c4a37]">Taubenflug</h2>
-            <p className="text-xs text-[#8a7a5c]">
-              {view === "decrypting"
-                ? "Nachricht wird entschlüsselt…"
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-[#e0d3ae] px-4 py-3 sm:px-5 dark:border-night-border">
+          <div className="min-w-0">
+            <h2 className="truncate font-serif text-lg text-[#5c4a37] dark:text-night-text">
+              🕊️ {pigeonName} <span className="text-sm text-[#8a7a5c] dark:text-night-muted">{routeLabel}</span>
+            </h2>
+            <p className="text-xs text-[#8a7a5c] dark:text-night-muted">
+              {justLanded
+                ? "Gelandet! Der Brief liegt jetzt im Chat ✉️"
                 : isDelivered
                   ? "Angekommen 🎉"
                   : isReady
                     ? `${formatRemaining(remainingSeconds ?? 0)} verbleibend`
-                    : "Die Taube wird vorbereitet…"}
+                    : loading
+                      ? "Flugdaten werden geladen…"
+                      : "Die Taube wird vorbereitet…"}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Schließen"
-            className="rounded-full p-2 text-[#8a7a5c] hover:bg-[#ecdfc0]"
+            className="flex-shrink-0 rounded-full p-2 text-[#8a7a5c] hover:bg-[#ecdfc0] dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -264,28 +248,15 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
           </button>
         </div>
 
-        <AnimatePresence mode="wait">
-          {view === "decrypting" ? (
-            <motion.div
-              key="decrypting"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.35 }}
-            >
-              <DecryptionSequence onComplete={onClose} />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="map"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.35 }}
-              className="overflow-y-auto"
-            >
+        {/* min-h-0 + flex-1: without them this flex child can't shrink
+            below its content, so on short screens the log was cut off
+            instead of scrolling. */}
+        <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
           <div className={`relative ${shaking ? "pigeon-map-shake" : ""}`}>
-            <svg viewBox={VIEWBOX} className="w-full" role="img" aria-label="Karte des Taubenflugs">
+            {!flight && loading && (
+              <Skeleton className="absolute inset-0 z-10 rounded-none opacity-70" />
+            )}
+            <svg viewBox={VIEWBOX} className="block w-full" role="img" aria-label="Karte des Taubenflugs">
               <defs>
                 <radialGradient id="pigeon-paper-bg" cx="50%" cy="35%" r="75%">
                   <stop offset="0%" stopColor="#faf3df" />
@@ -309,10 +280,10 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
               <path d={EUROPE_LANDMASS_D} fill="#8a9b6e" stroke="#5f7048" strokeWidth={1} />
               <path d={ASIA_LANDMASS_D} fill="#8a9b6e" stroke="#5f7048" strokeWidth={1} />
 
-              <text x={175} y={100} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[15px]">
+              <text x={175} y={100} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[20px]">
                 Deutschland
               </text>
-              <text x={655} y={90} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[15px]">
+              <text x={655} y={90} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[20px]">
                 China
               </text>
 
@@ -359,12 +330,17 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
             )}
           </div>
 
-          <div className="space-y-2 px-5 py-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-[#8a7a5c]">
+          <div className="space-y-2 px-4 py-4 sm:px-5">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[#8a7a5c] dark:text-night-muted">
               Reiseprotokoll
             </h3>
-            {passedEvents.length === 0 ? (
-              <p className="text-sm text-[#8a7a5c]">
+            {!flight && loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-4/5 rounded-xl" />
+              </div>
+            ) : passedEvents.length === 0 ? (
+              <p className="text-sm text-[#8a7a5c] dark:text-night-muted">
                 {isReady ? "Noch nichts Aufregendes passiert…" : "Die Taube startet gleich."}
               </p>
             ) : (
@@ -376,16 +352,18 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
                       initial={{ opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.35 }}
-                      className="flex items-start gap-2.5 rounded-xl border border-[#e0d3ae] bg-white/50 px-3 py-2"
+                      className="flex items-start gap-2.5 rounded-xl border border-[#e0d3ae] bg-white/50 px-3 py-2 dark:border-night-border dark:bg-night-raised"
                     >
                       <span className="text-lg leading-none">{event.emoji}</span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[#5c4a37]">{event.label}</p>
-                        <p className="text-xs text-[#8a7a5c]">{describePigeonEvent(event.type)}</p>
+                        <p className="text-sm font-medium text-[#5c4a37] dark:text-night-text">{event.label}</p>
+                        <p className="text-xs text-[#8a7a5c] dark:text-night-muted">{describePigeonEvent(event.type)}</p>
                       </div>
                       <span
                         className={`flex-shrink-0 text-xs font-medium ${
-                          event.duration_impact_seconds < 0 ? "text-emerald-700" : "text-[#8a7a5c]"
+                          event.duration_impact_seconds < 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : "text-[#8a7a5c] dark:text-night-muted"
                         }`}
                       >
                         {event.duration_impact_seconds < 0 ? "−" : "+"}
@@ -397,9 +375,7 @@ export function PigeonFlightMap({ messageId, onClose }: PigeonFlightMapProps) {
               </ul>
             )}
           </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </div>
       </motion.div>
     </motion.div>
   );

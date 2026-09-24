@@ -1,7 +1,9 @@
 /**
- * Text pool for <EncryptionSequence />. Every send picks a random subset of
- * MID_SEQUENCE_LINES (shuffled), then always ends with LAUNCH_LINES — extend
- * either array to add more variety, no component changes needed.
+ * Text pool for <EncryptionSequence />, the "hacker" show in front of every
+ * instant chat message (pigeon letters skip it). Every send picks a random
+ * subset of MID_SEQUENCE_LINES (shuffled), then always ends with
+ * TRANSMIT_LINES — extend either array for more variety, no component
+ * changes needed.
  */
 export type EncryptionLineKind = "log" | "progress" | "warning" | "success";
 
@@ -30,15 +32,15 @@ export const MID_SEQUENCE_LINES: EncryptionLineTemplate[] = [
   { kind: "log", text: "> HACKING THE MAINFRAME..." },
   { kind: "warning", text: "⚠ NSA VAN DETECTED OUTSIDE — REROUTING..." },
   { kind: "progress", text: "GENERATING NOISE ENTROPY" },
-  { kind: "log", text: "> SUMMONING CARRIER PIGEON..." },
+  { kind: "log", text: "> BOUNCING SIGNAL OFF THE MOON..." },
   { kind: "log", text: "> APPLYING TINFOIL WRAPPER..." },
   { kind: "log", text: "> LAUNDERING PACKETS THROUGH OFFSHORE SERVER..." },
   { kind: "progress", text: "SHUFFLING ENTROPY POOL" },
   { kind: "warning", text: "⚠ GLOBAL-K SATELLITE UPLINK DETECTED — JAMMING..." },
-  { kind: "log", text: "> TEACHING PIGEON MORSE CODE..." },
+  { kind: "log", text: "> TRANSLATING TO MORSE CODE AND BACK..." },
 ];
 
-export const LAUNCH_LINES: EncryptionLineTemplate[] = [
-  { kind: "success", text: "> ATTACHING TO CARRIER... PIGEON UNIT READY" },
-  { kind: "success", text: "🕊 LAUNCHED." },
+export const TRANSMIT_LINES: EncryptionLineTemplate[] = [
+  { kind: "success", text: "> HANDSHAKE WITH RECIPIENT... OK" },
+  { kind: "success", text: "✔ TRANSMITTED." },
 ];

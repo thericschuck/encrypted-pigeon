@@ -72,8 +72,8 @@ export function AuthCallbackHandler() {
   }, [searchParams]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6">
-      <p className="text-sm text-neutral-500">
+    <main className="flex min-h-[100dvh] items-center justify-center px-6">
+      <p className="text-sm text-neutral-500 dark:text-night-muted">
         {errorMessage ? `Anmeldung fehlgeschlagen: ${errorMessage}` : "Wird angemeldet..."}
       </p>
     </main>

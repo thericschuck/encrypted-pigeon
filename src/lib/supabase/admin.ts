@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
+import { resilientFetch } from "@/lib/supabase/resilient-fetch";
 
 /**
  * Service-role Supabase client for privileged, server-only bootstrap steps
@@ -17,6 +18,7 @@ export function createAdminClient() {
     {
       db: { schema: "pigeon" },
       auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: resilientFetch },
     }
   );
 }

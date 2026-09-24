@@ -1,85 +1,55 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { createClient } from "@/lib/supabase/client";
+import type { FlightRow } from "@/lib/chat/flights";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface PigeonStatusBadgeProps {
-  messageId: string;
-  isOwn: boolean;
+  /** undefined = no flight row (yet); see `loading` for "still fetching". */
+  flight: FlightRow | undefined;
+  /** True until <ChatRoom />'s initial flight fetch has resolved. */
+  loading: boolean;
   onOpen: () => void;
 }
 
-type FlightStatus = "encrypting" | "in_transit" | "delivered";
-
 /**
- * Small per-message indicator, independent of <PigeonFlightMap />: while
- * in_transit it's just the existing "view flight" link, once delivered it
- * becomes a small pigeon badge.
+ * Small indicator under a pigeon letter: while in_transit it's the "view
+ * flight" link, once delivered a small pigeon badge. Purely presentational — the
+ * flight row (and its realtime updates) come from <ChatRoom />.
  *
  * Distinguishes "delivered while I was watching" from "delivered while I
  * was away" purely from what this component happens to observe — no
  * persisted "seen" state needed. If it sees the live in_transit->delivered
- * transition (or reasonably recent history right after mount), it briefly
- * highlights as "Gerade angekommen"; if arrival is already old news, it's
- * just a plain badge, per the "no replay for stale arrivals" requirement.
+ * transition (or a very recent arrival right after mount), it briefly
+ * highlights as "Gerade angekommen"; stale arrivals are just a plain badge.
  */
 const RECENT_ARRIVAL_WINDOW_MS = 2 * 60 * 1000;
 const JUST_ARRIVED_HIGHLIGHT_MS = 4000;
 
-export function PigeonStatusBadge({ messageId, isOwn, onOpen }: PigeonStatusBadgeProps) {
-  const [status, setStatus] = useState<FlightStatus | null>(null);
+export function PigeonStatusBadge({ flight, loading, onOpen }: PigeonStatusBadgeProps) {
+  const status = flight?.status ?? null;
   const [justArrived, setJustArrived] = useState(false);
+  // null until the first known status, so the first observation can be
+  // told apart from a live transition.
+  const prevStatusRef = useRef<FlightRow["status"] | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
-    let cancelled = false;
+    if (!status) return;
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = status;
 
-    supabase
-      .from("pigeon_flights")
-      .select("status, arrival_time")
-      .eq("message_id", messageId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled || !data) return;
-        const row = data as unknown as { status: FlightStatus; arrival_time: string | null };
-        setStatus(row.status);
-        if (
-          row.status === "delivered" &&
-          row.arrival_time &&
-          Date.now() - new Date(row.arrival_time).getTime() <= RECENT_ARRIVAL_WINDOW_MS
-        ) {
-          setJustArrived(true);
-        }
-      });
-
-    const channel = supabase
-      .channel(`pigeon-status-${messageId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "pigeon",
-          table: "pigeon_flights",
-          filter: `message_id=eq.${messageId}`,
-        },
-        (payload) => {
-          const next = payload.new as { status: FlightStatus };
-          setStatus((prevStatus) => {
-            if (prevStatus === "in_transit" && next.status === "delivered") {
-              setJustArrived(true);
-            }
-            return next.status;
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, [messageId]);
+    if (prevStatus === "in_transit" && status === "delivered") {
+      setJustArrived(true);
+    } else if (
+      prevStatus === null &&
+      status === "delivered" &&
+      flight?.arrival_time &&
+      Date.now() - new Date(flight.arrival_time).getTime() <= RECENT_ARRIVAL_WINDOW_MS
+    ) {
+      setJustArrived(true);
+    }
+  }, [status, flight?.arrival_time]);
 
   useEffect(() => {
     if (!justArrived) return;
@@ -87,14 +57,23 @@ export function PigeonStatusBadge({ messageId, isOwn, onOpen }: PigeonStatusBadg
     return () => clearTimeout(timeout);
   }, [justArrived]);
 
-  if (!status || status === "encrypting") return null;
+  if (loading && !flight) {
+    return <Skeleton className="h-3.5 w-28" />;
+  }
 
-  const linkClass = `text-xs opacity-70 hover:opacity-100 ${isOwn ? "text-white" : "text-neutral-700"}`;
+  // Letters always render on the parchment bubble, so no own/other colors.
+  const linkClass = "text-xs opacity-70 hover:opacity-100";
+
+  // No row yet: the server-side start-pigeon-flight call is usually only a
+  // beat behind the letter itself.
+  if (!status || status === "encrypting") {
+    return <span className="text-xs opacity-60">🕊 Macht sich startklar…</span>;
+  }
 
   if (status === "in_transit") {
     return (
       <button type="button" onClick={onOpen} className={linkClass}>
-        🕊 Taubenflug ansehen
+        🕊 Unterwegs · Flug ansehen
       </button>
     );
   }
@@ -106,7 +85,7 @@ export function PigeonStatusBadge({ messageId, isOwn, onOpen }: PigeonStatusBadg
       animate={justArrived ? { scale: [0.85, 1.08, 1] } : undefined}
       transition={{ duration: 0.5 }}
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors ${linkClass} ${
-        justArrived ? (isOwn ? "bg-white/20" : "bg-amber-100") : ""
+        justArrived ? "bg-amber-100 dark:bg-amber-900/40" : ""
       }`}
     >
       🕊 {justArrived ? "Gerade angekommen" : "Angekommen"}

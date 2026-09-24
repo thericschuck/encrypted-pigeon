@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { isIOS, isStandalone } from "@/lib/device";
 
 const DISMISSED_STORAGE_KEY = "pigeon-pwa-onboarding-dismissed";
 const SHOW_DELAY_MS = 1500;
@@ -9,23 +10,6 @@ const SHOW_DELAY_MS = 1500;
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
-
-function isIOS(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const isIOSUserAgent = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  // iPadOS 13+ reports as "MacIntel" in the UA string; touch support is the
-  // only reliable way left to tell it apart from an actual Mac.
-  const isIPadOS = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-  return isIOSUserAgent || isIPadOS;
-}
-
-function isStandalone(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
 }
 
 /**
@@ -90,21 +74,21 @@ export function PwaInstallPrompt() {
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
-      <div className="w-full max-w-sm rounded-2xl border border-[#d8c9a3] bg-[#f7f0df] p-4 shadow-2xl">
+    <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="w-full max-w-sm rounded-2xl border border-[#d8c9a3] bg-[#f7f0df] p-4 shadow-2xl dark:border-night-border dark:bg-night-surface">
         <div className="flex items-start gap-3">
           <span className="text-2xl leading-none">🕊️</span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[#5c4a37]">App installieren</p>
+            <p className="text-sm font-semibold text-[#5c4a37] dark:text-night-text">App installieren</p>
             {isIOS() ? (
-              <p className="mt-1 text-xs text-[#8a7a5c]">
+              <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
                 Tippe unten auf <span className="font-medium">Teilen</span> und dann auf{" "}
                 <span className="font-medium">„Zum Home-Bildschirm“</span>, um Encrypted
                 Pigeon wie eine App zu nutzen.
               </p>
             ) : deferredPrompt ? (
               <>
-                <p className="mt-1 text-xs text-[#8a7a5c]">
+                <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
                   Installiere Encrypted Pigeon für schnelleren Zugriff und Vollbild-Ansicht.
                 </p>
                 <button
@@ -116,7 +100,7 @@ export function PwaInstallPrompt() {
                 </button>
               </>
             ) : (
-              <p className="mt-1 text-xs text-[#8a7a5c]">
+              <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
                 Öffne das Menü deines Browsers (⋮) und tippe auf{" "}
                 <span className="font-medium">„App installieren“</span>, um Encrypted Pigeon
                 wie eine App zu nutzen.
@@ -127,7 +111,7 @@ export function PwaInstallPrompt() {
             type="button"
             onClick={dismiss}
             aria-label="Schließen"
-            className="flex-shrink-0 rounded-full p-1 text-[#8a7a5c] hover:bg-[#ecdfc0]"
+            className="flex-shrink-0 rounded-full p-1 text-[#8a7a5c] hover:bg-[#ecdfc0] dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />

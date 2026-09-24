@@ -105,7 +105,24 @@ export function VoiceRecorderButton({
     }
   }, []);
 
-  useEffect(() => stopLevelMeter, [stopLevelMeter]);
+  // Unmount mid-recording (navigating away, closing the chat): stop the
+  // recorder and release the microphone. Without this the mic indicator
+  // stayed on and the stream + AudioContext leaked until a full reload.
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") recorder.stop();
+      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopLevelMeter();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, [stopLevelMeter]);
 
   const startRecording = useCallback(
     async (clientX: number) => {
@@ -225,7 +242,7 @@ export function VoiceRecorderButton({
   return (
     <div className="relative flex items-center">
       {isRecording && (
-        <div className="absolute right-full mr-2 flex items-center gap-2 whitespace-nowrap rounded-full bg-neutral-100 px-3 py-1.5 text-xs text-neutral-700">
+        <div className="absolute right-full mr-2 flex items-center gap-2 whitespace-nowrap rounded-full bg-neutral-100 px-3 py-1.5 text-xs text-neutral-700 dark:bg-night-raised dark:text-night-text">
           <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-red-500" />
           <span className="tabular-nums">{timeLabel}</span>
           <span className="flex items-end gap-0.5" aria-hidden="true">
@@ -237,8 +254,16 @@ export function VoiceRecorderButton({
               />
             ))}
           </span>
-          <span className={nearCancel ? "font-medium text-red-500" : "text-neutral-400"}>
-            {nearCancel ? "Loslassen zum Abbrechen" : "← Wischen zum Abbrechen"}
+          <span className={nearCancel ? "font-medium text-red-500" : "text-neutral-400 dark:text-night-muted"}>
+            {/* Short label on narrow phones so the pill doesn't run off the left edge. */}
+            {nearCancel ? (
+              "Loslassen zum Abbrechen"
+            ) : (
+              <>
+                <span className="min-[400px]:hidden">← Abbrechen</span>
+                <span className="hidden min-[400px]:inline">← Wischen zum Abbrechen</span>
+              </>
+            )}
           </span>
         </div>
       )}
@@ -256,7 +281,9 @@ export function VoiceRecorderButton({
             : undefined
         }
         className={`rounded-full p-2 transition-colors ${
-          isRecording ? "bg-red-500 text-white" : "text-neutral-500 hover:bg-neutral-100"
+          isRecording
+            ? "bg-red-500 text-white"
+            : "text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
         } disabled:opacity-50`}
       >
         <svg

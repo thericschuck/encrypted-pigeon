@@ -1,7 +1,15 @@
 // Shared low-level upload used by both image and voice message attachments
 // (see image-upload.ts / voice-recording.ts).
 
-export class ChatUploadError extends Error {}
+export class ChatUploadError extends Error {
+  /** HTTP status of the failed upload, if it got a response at all. */
+  status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 interface UploadToBucketOptions {
   supabaseUrl: string;
@@ -49,7 +57,8 @@ export function uploadToBucket({
       } else {
         reject(
           new ChatUploadError(
-            `Upload fehlgeschlagen (${xhr.status}). Bitte erneut versuchen.`
+            `Upload fehlgeschlagen (${xhr.status}). Bitte erneut versuchen.`,
+            xhr.status
           )
         );
       }

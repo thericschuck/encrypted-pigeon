@@ -1,9 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isNetworkError, resilientFetch } from "@/lib/supabase/resilient-fetch";
 
 const PUBLIC_PATHS = [
   "/login",
-  "/auth/callback",
+  // /auth/callback (login links) and /auth/signout
+  "/auth/",
   // PWA assets: fetched by the browser/OS to check install eligibility and
   // to register/update the service worker, both of which happen outside
   // any authenticated page context.
@@ -11,6 +13,10 @@ const PUBLIC_PATHS = [
   "/icons",
   "/sw.js",
   "/workbox-",
+  // Custom push worker + next-pwa's helper worker, importScripts()-ed by
+  // sw.js — a redirect to /login here would fail the whole SW install.
+  "/worker-",
+  "/swe-worker-",
 ];
 
 /**
@@ -26,6 +32,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      global: { fetch: resilientFetch },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -45,7 +52,15 @@ export async function middleware(request: NextRequest) {
 
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
+
+  // Supabase unreachable (flaky network): that says nothing about whether
+  // the user is signed in, so don't bounce them to /login — let the page
+  // render and fail/retry on its own instead.
+  if (!user && isNetworkError(error)) {
+    return response;
+  }
 
   const isPublicPath = PUBLIC_PATHS.some((path) =>
     request.nextUrl.pathname.startsWith(path)
@@ -55,7 +70,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (user && request.nextUrl.pathname === "/login") {
+  // A signed-in user on /login?error=... was sent there on purpose (e.g.
+  // "/" found no chat for them) — bouncing them back to "/" would loop.
+  if (
+    user &&
+    request.nextUrl.pathname === "/login" &&
+    !request.nextUrl.searchParams.has("error")
+  ) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
@@ -64,6 +85,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp3)$).*)",
   ],
 };

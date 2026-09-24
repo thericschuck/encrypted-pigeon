@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/lib/supabase/types";
+import { resilientFetch } from "@/lib/supabase/resilient-fetch";
 
 /**
  * Supabase client for use in Client Components ("use client").
@@ -14,6 +15,6 @@ export function createClient() {
   return createBrowserClient<Database, "pigeon">(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { db: { schema: "pigeon" } }
+    { db: { schema: "pigeon" }, global: { fetch: resilientFetch } }
   );
 }

@@ -6,42 +6,63 @@ interface AuthUser {
   email: string;
 }
 
-/**
- * Runs on first login (from the magic-link callback), and as a self-healing
- * fallback if a returning user somehow has no chat yet. Idempotent — safe to
- * call repeatedly for the same user.
- *
- * - Ensures a pigeon.profiles row exists for this auth user. Their
- *   auth.users row may predate this project (it's shared with an unrelated
- *   old project) — that's expected, not an error.
- * - For non-admin users, ensures a 1:1 chat with the admin exists.
- *
- * Uses the service-role client because a brand-new user has no rows for any
- * RLS policy to key off yet; this bootstrap step intentionally sits outside
- * the RLS model that governs ordinary app usage.
- */
-export async function ensureProfileAndHomeChat(
-  user: AuthUser
-): Promise<{ chatId: string | null }> {
-  const admin = createAdminClient();
+export type MembershipResult =
+  | { status: "member"; homeChatId: string | null }
+  | { status: "not_invited" };
 
-  const { data: existingProfile } = await admin
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * Runs on every login (password, magic link, invite link) and as a
+ * self-healing check on the dashboard. Idempotent.
+ *
+ * A pigeon.profiles row IS membership. auth.users is shared with an
+ * unrelated old project, so having a Supabase session proves nothing:
+ * a profile is only created for the admin or an email on pigeon.invites
+ * (written by the admin's invite action). Everyone else gets
+ * "not_invited" and is signed out by the caller.
+ *
+ * New non-admin members also get a 1:1 chat with the admin, so the person
+ * who invited them is already there on first login.
+ *
+ * Uses the service-role client: profiles/chats/invites are deliberately not
+ * writable through RLS at all.
+ */
+export async function ensureMembership(user: AuthUser): Promise<MembershipResult> {
+  const admin = createAdminClient();
+  const email = user.email.toLowerCase();
+  const isAdmin = isAdminEmail(email);
+
+  // Lookup errors must throw, never read as "no row": a network hiccup
+  // would otherwise count as "not invited" and sign a real member out.
+  const { data: existingProfile, error: profileError } = await admin
     .from("profiles")
     .select("id")
     .eq("id", user.id)
     .maybeSingle();
+  if (profileError) throw profileError;
 
   if (!existingProfile) {
-    const { error } = await admin.from("profiles").insert({
-      id: user.id,
-      email: user.email,
-    });
-    if (error) throw error;
+    if (!isAdmin) {
+      const { data: invite, error: inviteError } = await admin
+        .from("invites")
+        .select("email")
+        .eq("email", email)
+        .maybeSingle();
+      if (inviteError) throw inviteError;
+      if (!invite) return { status: "not_invited" };
+    }
+
+    const { error } = await admin.from("profiles").insert({ id: user.id, email: user.email });
+    // 23505: a parallel request (e.g. two tabs) created it first — fine.
+    if (error && error.code !== "23505") throw error;
+
+    await admin
+      .from("invites")
+      .upsert({ email, accepted_at: new Date().toISOString() }, { onConflict: "email" });
   }
 
-  if (isAdminEmail(user.email)) {
-    return { chatId: null };
-  }
+  if (isAdmin) return { status: "member", homeChatId: null };
 
   const { data: adminProfile } = await admin
     .from("profiles")
@@ -49,19 +70,15 @@ export async function ensureProfileAndHomeChat(
     .eq("email", getAdminEmail())
     .maybeSingle();
 
-  if (!adminProfile) {
-    // The admin hasn't logged in yet. Shouldn't happen in practice since
-    // /admin/invite requires an admin session to send an invite in the
-    // first place — but don't break this person's login over it.
-    return { chatId: null };
-  }
+  if (!adminProfile) return { status: "member", homeChatId: null };
 
-  const chatId = await findOrCreateDirectChat(admin, user.id, adminProfile.id);
-  return { chatId };
+  const homeChatId = await findOrCreateDirectChat(admin, user.id, adminProfile.id);
+  return { status: "member", homeChatId };
 }
 
-async function findOrCreateDirectChat(
-  admin: ReturnType<typeof createAdminClient>,
+/** Finds the 1:1 chat between two users, creating it if there is none. */
+export async function findOrCreateDirectChat(
+  admin: AdminClient,
   userId: string,
   otherUserId: string
 ): Promise<string> {

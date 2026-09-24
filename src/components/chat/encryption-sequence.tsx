@@ -3,38 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  LAUNCH_LINES,
+  TRANSMIT_LINES,
   MID_SEQUENCE_LINES,
   type EncryptionLineTemplate,
 } from "@/lib/chat/encryption-lines";
+import { playEncryptEnd, preloadChimeSounds } from "@/lib/chat/chime-sounds";
 
 interface EncryptionSequenceProps {
   /** Show the overlay and (re-)run a fresh randomized sequence. */
   active: boolean;
   /** Fires once the full sequence (lines + closing pause) has played out. */
   onComplete: () => void;
-}
-
-const START_SOUND_SRC = "/sounds/encrypt-start.mp3";
-const END_SOUND_SRC = "/sounds/encrypt-end.mp3";
-
-// Drop actual files at public/sounds/encrypt-{start,end}.mp3 to enable —
-// missing files just fail play() silently below, no crash either way.
-function useChimeSounds() {
-  const startRef = useRef<HTMLAudioElement | null>(null);
-  const endRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    startRef.current = new Audio(START_SOUND_SRC);
-    endRef.current = new Audio(END_SOUND_SRC);
-    startRef.current.volume = 0.5;
-    endRef.current.volume = 0.5;
-  }, []);
-
-  return {
-    playStart: () => startRef.current?.play().catch(() => {}),
-    playEnd: () => endRef.current?.play().catch(() => {}),
-  };
 }
 
 function shuffled<T>(items: T[]): T[] {
@@ -46,11 +25,11 @@ function shuffled<T>(items: T[]): T[] {
   return copy;
 }
 
-// 6-9 mid lines + the 2 launch lines lands the whole sequence around 4-7s
+// 6-9 mid lines + the 2 closing lines lands the whole sequence around 4-7s
 // (see per-line delays below), without hand-tuning an exact total.
 function pickSequence(): EncryptionLineTemplate[] {
   const midCount = 6 + Math.floor(Math.random() * 4);
-  return [...shuffled(MID_SEQUENCE_LINES).slice(0, midCount), ...LAUNCH_LINES];
+  return [...shuffled(MID_SEQUENCE_LINES).slice(0, midCount), ...TRANSMIT_LINES];
 }
 
 const BAR_WIDTH = 20;
@@ -100,9 +79,15 @@ function lineColorClass(kind: EncryptionLineTemplate["kind"]) {
 export function EncryptionSequence({ active, onComplete }: EncryptionSequenceProps) {
   const [lines, setLines] = useState<EncryptionLineTemplate[]>([]);
   const [revealedCount, setRevealedCount] = useState(0);
-  const { playStart, playEnd } = useChimeSounds();
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  // Set by the running sequence; tapping the overlay ends it early (the
+  // message itself was already sent in the background either way).
+  const skipRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    preloadChimeSounds();
+  }, []);
 
   useEffect(() => {
     if (!active) {
@@ -113,7 +98,8 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
     const chosen = pickSequence();
     setLines(chosen);
     setRevealedCount(0);
-    playStart();
+    // The start chime is played by the send handler itself (see
+    // lib/chat/chime-sounds.ts for why it can't happen here on iOS).
 
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -126,7 +112,7 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
         timers.push(
           setTimeout(() => {
             if (cancelled) return;
-            playEnd();
+            playEncryptEnd();
             onCompleteRef.current();
           }, FINAL_PAUSE_MS)
         );
@@ -142,12 +128,20 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
 
     timers.push(setTimeout(() => showLine(0), 300));
 
+    skipRef.current = () => {
+      if (cancelled) return;
+      cancelled = true;
+      timers.forEach(clearTimeout);
+      onCompleteRef.current();
+    };
+
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
+      skipRef.current = null;
     };
-    // playStart/playEnd are stable refs from useChimeSounds; re-running this
-    // effect on every render would restart the sequence mid-animation.
+    // Re-running this effect on every render would restart the sequence
+    // mid-animation; only `active` flipping should.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
@@ -164,12 +158,15 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.4, ease: "easeInOut" }}
-          className="encryption-flicker fixed inset-0 z-50 flex items-center justify-center bg-black/95 px-6"
+          onClick={() => skipRef.current?.()}
+          role="status"
+          aria-label="Nachricht wird verschlüsselt — tippen zum Überspringen"
+          className="encryption-flicker fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-6"
         >
           <div className="encryption-scanlines relative w-full max-w-lg overflow-hidden rounded-lg border border-green-900/60 bg-black p-5 font-mono text-sm shadow-[0_0_40px_rgba(0,255,140,0.08)]">
             <div className="mb-3 flex items-center gap-2 border-b border-green-900/60 pb-2 text-xs text-green-600">
               <span className="h-2 w-2 rounded-full bg-green-500" />
-              PIGEON_ENCRYPTION_PROTOCOL v2.3
+              PIGEON_SECURE_CHANNEL v3.0
             </div>
             <div className="space-y-1.5">
               {visibleLines.map((line, index) => (
@@ -199,6 +196,7 @@ export function EncryptionSequence({ active, onComplete }: EncryptionSequencePro
               />
             </div>
           </div>
+          <p className="font-mono text-[11px] text-green-800">[ tippen zum Überspringen ]</p>
         </motion.div>
       )}
     </AnimatePresence>

@@ -5,13 +5,25 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
 }
 
+/* Matches theme.extend.colors.night in tailwind.config.ts. Dark applies
+   when the OS prefers it (unless the user forced light via <html
+   class="light">) or when forced via <html class="dark">. Every dark block
+   below follows the same pattern. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not(.light) {
+    --background: #17130f;
+    --foreground: #eee4cf;
+    color-scheme: dark;
   }
+}
+
+:root.dark {
+  --background: #17130f;
+  --foreground: #eee4cf;
+  color-scheme: dark;
 }
 
 body {
@@ -20,15 +32,82 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Form fields keep a fixed light background (Tailwind classes like
-   bg-white/border-neutral-300 throughout the app assume this), so their
-   text color must stay fixed too — otherwise --foreground turning light in
-   dark mode leaves light text on that same light background. */
-input,
-textarea,
-select {
+/* Explicit field colors per scheme, so no browser default (e.g. a light
+   autofill/background with inherited light text) ever produces
+   light-on-light or dark-on-dark. Range inputs are excluded — they're
+   styled via accent-color in <VoiceMessagePlayer />. Everything is wrapped
+   in :where() (specificity 0), so any Tailwind class still wins and the
+   dark rules below win over this one simply by coming later. */
+:where(input:not([type="range"]), textarea, select) {
   color: #171717;
   background-color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(:root:not(.light) input:not([type="range"]), :root:not(.light) textarea, :root:not(.light) select) {
+    color: #eee4cf;
+    background-color: #211c16;
+  }
+
+  :where(:root:not(.light) input, :root:not(.light) textarea)::placeholder {
+    color: #7d705a;
+  }
+}
+
+:where(:root.dark input:not([type="range"]), :root.dark textarea, :root.dark select) {
+  color: #eee4cf;
+  background-color: #211c16;
+}
+
+:where(:root.dark input, :root.dark textarea)::placeholder {
+  color: #7d705a;
+}
+
+/* Loading skeletons (<Skeleton />, src/components/ui/skeleton.tsx). */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.06) 0%,
+    rgba(0, 0, 0, 0.12) 50%,
+    rgba(0, 0, 0, 0.06) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) .skeleton {
+    background-image: linear-gradient(
+      90deg,
+      rgba(238, 228, 207, 0.06) 0%,
+      rgba(238, 228, 207, 0.13) 50%,
+      rgba(238, 228, 207, 0.06) 100%
+    );
+  }
+}
+
+:root.dark .skeleton {
+  background-image: linear-gradient(
+    90deg,
+    rgba(238, 228, 207, 0.06) 0%,
+    rgba(238, 228, 207, 0.13) 50%,
+    rgba(238, 228, 207, 0.06) 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }
 
 @layer utilities {

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/supabase/types";
+import { resilientFetch } from "@/lib/supabase/resilient-fetch";
 
 /**
  * Supabase client for use in Server Components, Server Actions, and Route
@@ -20,6 +21,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       db: { schema: "pigeon" },
+      global: { fetch: resilientFetch },
       cookies: {
         getAll() {
           return cookieStore.getAll();

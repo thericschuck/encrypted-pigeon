@@ -21,7 +21,7 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded bg-neutral-900 px-3 py-2 text-white disabled:opacity-50"
+      className="rounded bg-neutral-900 px-3 py-2 text-white disabled:opacity-50 dark:bg-night-accent dark:text-night-bg"
     >
       {pending ? "Wird angemeldet..." : "Anmelden"}
     </button>
@@ -51,18 +51,18 @@ export function PasswordLoginForm({ action }: PasswordLoginFormProps) {
         name="email"
         required
         placeholder="du@example.com"
-        className="rounded border border-neutral-300 px-3 py-2"
+        className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
       />
       <input
         type="password"
         name="password"
         required
         placeholder="Passwort"
-        className="rounded border border-neutral-300 px-3 py-2"
+        className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
       />
       <SubmitButton />
       {state?.status === "error" && (
-        <p className="text-sm text-red-600">{state.message}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{state.message}</p>
       )}
     </form>
   );

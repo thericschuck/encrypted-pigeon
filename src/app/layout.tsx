@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { cookies } from "next/headers";
 import "./globals.css";
 import { PwaInstallPrompt } from "@/components/pwa/pwa-install-prompt";
+import { THEME_COOKIE, parseTheme, themeClass } from "@/lib/theme";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -60,18 +62,28 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#c1643a",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#c1643a" },
+    { media: "(prefers-color-scheme: dark)", color: "#17130f" },
+  ],
+  colorScheme: "light dark",
   width: "device-width",
   initialScale: 1,
+  // Lets the layout extend under the iPhone home indicator / notch; the
+  // chat header and composer pad themselves with env(safe-area-inset-*).
+  viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+
   return (
-    <html lang="en">
+    // suppressHydrationWarning: <ThemeSync /> may adjust this class client-side.
+    <html lang="de" className={themeClass(theme) || undefined} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
