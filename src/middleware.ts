@@ -17,6 +17,8 @@ const PUBLIC_PATHS = [
   // sw.js — a redirect to /login here would fail the whole SW install.
   "/worker-",
   "/swe-worker-",
+  // Self-hosted libraries loaded by web workers (lib/image-compression.ts).
+  "/vendor/",
 ];
 
 /**

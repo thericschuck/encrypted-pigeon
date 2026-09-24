@@ -1,9 +1,8 @@
 import imageCompression from "browser-image-compression";
 import { ChatUploadError } from "./storage-upload";
+import { IMAGE_COMPRESSION_LIB_URL } from "@/lib/image-compression";
 
-// Must match the bucket created in
-// supabase/migrations/20260922000000_chat_images_storage.sql.
-export const CHAT_IMAGE_BUCKET = "pigeon-chat-images";
+export { CHAT_IMAGE_BUCKET } from "./buckets";
 
 const MAX_WIDTH_OR_HEIGHT = 1920;
 const MAX_SIZE_MB = 4;
@@ -14,6 +13,7 @@ export async function compressChatImage(file: File): Promise<File> {
       maxWidthOrHeight: MAX_WIDTH_OR_HEIGHT,
       maxSizeMB: MAX_SIZE_MB,
       useWebWorker: true,
+      libURL: IMAGE_COMPRESSION_LIB_URL,
     });
   } catch (error) {
     throw new ChatUploadError(

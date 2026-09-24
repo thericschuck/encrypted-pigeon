@@ -55,10 +55,12 @@ export function MagicLinkForm({
       <SubmitButton label={submitLabel} pendingLabel={pendingLabel} />
       {state.status !== "idle" && (
         <p
+          // Keyed by the message, so each new result fades in again.
+          key={state.message}
           className={
             state.status === "error"
-              ? "text-sm text-red-600 dark:text-red-400"
-              : "text-sm text-green-600 dark:text-emerald-400"
+              ? "animate-fade-in text-sm text-red-600 dark:text-red-400"
+              : "animate-fade-in text-sm text-green-600 dark:text-emerald-400"
           }
         >
           {state.message}

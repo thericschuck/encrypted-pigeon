@@ -62,7 +62,9 @@ export function PasswordLoginForm({ action }: PasswordLoginFormProps) {
       />
       <SubmitButton />
       {state?.status === "error" && (
-        <p className="text-sm text-red-600 dark:text-red-400">{state.message}</p>
+        <p key={state.message} className="animate-fade-in text-sm text-red-600 dark:text-red-400">
+          {state.message}
+        </p>
       )}
     </form>
   );

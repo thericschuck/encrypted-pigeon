@@ -21,7 +21,7 @@ import { forbiddenResponse, isServiceRoleRequest } from "../_shared/service-role
  * not something any single user's RLS grant should cover.
  */
 
-type EventType = "message" | "incident" | "arrived";
+type EventType = "message" | "incident" | "arrived" | "test";
 
 // Keep in sync with src/lib/push/notification-prefs.ts. Users switch types
 // off in the settings (pigeon.profiles.notification_prefs, { [type]: false });
@@ -30,7 +30,10 @@ type NotificationType = "chat" | "letter_incoming" | "letter_arrived" | "own_arr
 
 interface RequestBody {
   event_type: EventType;
-  message_id: string;
+  /** Required for every event except "test". */
+  message_id?: string;
+  /** "test" only: whose devices get the test notification. */
+  user_id?: string;
   event?: { label?: string; emoji?: string };
 }
 
@@ -169,17 +172,40 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  if (!body.message_id || !body.event_type) {
-    return new Response(JSON.stringify({ error: "message_id and event_type are required" }), {
-      status: 400,
-    });
-  }
-
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { db: { schema: "pigeon" }, auth: { persistSession: false } }
   );
+
+  // "Test-Benachrichtigung" from the settings page (sent via a server
+  // action that checked who's asking): only that user's own devices.
+  if (body.event_type === "test") {
+    if (!body.user_id) {
+      return new Response(JSON.stringify({ error: "user_id is required" }), { status: 400 });
+    }
+    return sendToUsers(
+      supabase,
+      new Map([
+        [
+          body.user_id,
+          {
+            type: "chat",
+            title: "🕊️ Test-Benachrichtigung",
+            body: "Benachrichtigungen funktionieren auf diesem Gerät.",
+            tag: "test",
+            url: "/settings",
+          },
+        ],
+      ])
+    );
+  }
+
+  if (!body.message_id || !body.event_type) {
+    return new Response(JSON.stringify({ error: "message_id and event_type are required" }), {
+      status: 400,
+    });
+  }
 
   const { data: message, error: messageError } = await supabase
     .from("messages")
@@ -229,6 +255,14 @@ Deno.serve(async (req: Request) => {
     notificationsByUser.set(user_id, notification);
   }
 
+  return sendToUsers(supabase, notificationsByUser);
+});
+
+/** Sends each user's notification to all of their stored devices. */
+async function sendToUsers(
+  supabase: ReturnType<typeof createClient>,
+  notificationsByUser: Map<string, Notification>
+): Promise<Response> {
   if (notificationsByUser.size === 0) {
     return new Response(JSON.stringify({ sent: 0, failed: 0 }), {
       headers: { "Content-Type": "application/json" },
@@ -288,4 +322,4 @@ Deno.serve(async (req: Request) => {
   return new Response(JSON.stringify({ sent, failed }), {
     headers: { "Content-Type": "application/json" },
   });
-});
+}

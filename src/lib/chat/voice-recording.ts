@@ -14,9 +14,7 @@ const AUDIO_MIME_CANDIDATES = [
   "audio/aac",
 ];
 
-// Must match the bucket created in
-// supabase/migrations/20260923010000_voice_messages_storage.sql.
-export const CHAT_VOICE_BUCKET = "pigeon-voice-messages";
+export { CHAT_VOICE_BUCKET } from "./buckets";
 
 export function isVoiceRecordingSupported(): boolean {
   return (

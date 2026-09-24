@@ -6,9 +6,10 @@ import { isIOS, isStandalone } from "@/lib/device";
 import {
   getCurrentPushSubscription,
   isPushSupported,
-  requestPushPermissionAndSubscribe,
+  subscribeToPush,
   unsubscribeFromPush,
 } from "@/lib/push/subscribe";
+import { sendTestPush, type TestPushResult } from "@/app/actions/push";
 import {
   NOTIFICATION_OPTIONS,
   isNotificationEnabled,
@@ -23,14 +24,32 @@ interface PushSettingsProps {
   initialPrefs: NotificationPrefs;
 }
 
-type Status = "loading" | "unsupported" | "ios-not-installed" | "denied" | "off" | "on";
+type Status = "loading" | "unsupported" | "ios-not-installed" | "denied" | "off" | "on" | "error";
+
+function testResultText(result: TestPushResult): string {
+  if (result.status === "sent") {
+    return result.devices === 1
+      ? "Gesendet — sollte gleich auf diesem Gerät erscheinen."
+      : `Gesendet an ${result.devices} Geräte.`;
+  }
+  if (result.status === "no-devices") return "Für dein Konto ist kein Gerät registriert.";
+  return `Test fehlgeschlagen: ${result.message}`;
+}
 
 export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
   const [status, setStatus] = useState<Status>("loading");
   const [busy, setBusy] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPrefs>(initialPrefs);
   const [prefsError, setPrefsError] = useState<string | null>(null);
+  const [errorReason, setErrorReason] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
+  /**
+   * "On" means the server can actually reach this device: the browser has
+   * a subscription AND it's stored for this account (re-stored here if it
+   * isn't — e.g. it was never saved, or removed as stale).
+   */
   async function refresh() {
     if (isIOS() && !isStandalone()) {
       setStatus("ios-not-installed");
@@ -45,7 +64,13 @@ export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
       return;
     }
     const subscription = await getCurrentPushSubscription();
-    setStatus(subscription && Notification.permission === "granted" ? "on" : "off");
+    if (!subscription || Notification.permission !== "granted") {
+      setStatus("off");
+      return;
+    }
+    const result = await subscribeToPush(createClient(), userId);
+    setErrorReason(result.ok ? null : result.reason);
+    setStatus(result.ok ? "on" : "error");
   }
 
   useEffect(() => {
@@ -55,10 +80,23 @@ export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
 
   async function handleEnable() {
     setBusy(true);
-    const supabase = createClient();
-    await requestPushPermissionAndSubscribe(supabase, userId);
-    await refresh();
+    setTestResult(null);
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      const result = await subscribeToPush(createClient(), userId);
+      setErrorReason(result.ok ? null : result.reason);
+      setStatus(result.ok ? "on" : "error");
+    } else {
+      await refresh();
+    }
     setBusy(false);
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    setTestResult(testResultText(await sendTestPush()));
+    setTesting(false);
   }
 
   async function handleDisable() {
@@ -128,8 +166,24 @@ export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
           </button>
         )}
 
+        {status === "error" && (
+          <div className="flex flex-col items-start gap-2">
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {errorReason}
+            </p>
+            <button
+              type="button"
+              onClick={handleEnable}
+              disabled={busy}
+              className="rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-night-accent dark:text-night-bg"
+            >
+              {busy ? "Einen Moment…" : "Erneut versuchen"}
+            </button>
+          </div>
+        )}
+
         {status === "on" && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
               ✓ Aktiv auf diesem Gerät
             </span>
@@ -141,7 +195,18 @@ export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
             >
               {busy ? "Einen Moment…" : "Deaktivieren"}
             </button>
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={testing}
+              className="rounded-full border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 disabled:opacity-50 dark:border-night-border dark:text-night-text"
+            >
+              {testing ? "Sende…" : "Test senden"}
+            </button>
           </div>
+        )}
+        {testResult && (
+          <p className="mt-2 text-xs text-neutral-500 dark:text-night-muted">{testResult}</p>
         )}
       </div>
 

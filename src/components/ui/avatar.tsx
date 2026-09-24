@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { accentOf, avatarUrlOf, displayNameOf, type MemberProfile } from "@/lib/profile";
 
 interface AvatarProps {
@@ -13,19 +16,25 @@ const SIZE_CLASSES = {
   lg: "h-20 w-20 text-2xl",
 };
 
-/** Profile picture, or the person's initial on their accent color. */
+/**
+ * Profile picture, or the person's initial on their accent color — also
+ * when the picture fails to load (deleted file, network), instead of a
+ * broken-image icon.
+ */
 export function Avatar({ profile, size = "md", srcOverride }: AvatarProps) {
   const src = srcOverride ?? avatarUrlOf(profile);
   const name = displayNameOf(profile);
   const sizeClass = SIZE_CLASSES[size];
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
-  if (src) {
+  if (src && src !== failedSrc) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={src}
         alt=""
         loading="lazy"
+        onError={() => setFailedSrc(src)}
         className={`${sizeClass} flex-shrink-0 rounded-full object-cover`}
       />
     );

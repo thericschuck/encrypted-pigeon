@@ -40,25 +40,63 @@ export async function requestPushPermissionAndSubscribe(
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return permission;
 
-  await subscribeToPush(supabase, userId);
+  const result = await subscribeToPush(supabase, userId);
+  if (!result.ok) console.error("Push subscription failed:", result.reason);
   return permission;
 }
 
-export async function subscribeToPush(supabase: PigeonClient, userId: string): Promise<boolean> {
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  if (!publicKey || !isPushSupported() || Notification.permission !== "granted") return false;
+export type SubscribeResult = { ok: true } | { ok: false; reason: string };
 
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    });
+// navigator.serviceWorker.ready never settles if no service worker gets
+// registered (dev mode, blocked, failed install) — don't hang forever.
+const SERVICE_WORKER_TIMEOUT_MS = 10_000;
+
+async function readyRegistration(): Promise<ServiceWorkerRegistration | null> {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), SERVICE_WORKER_TIMEOUT_MS)),
+  ]);
+}
+
+/**
+ * Subscribes this device (if it isn't yet) and makes sure the server knows
+ * the subscription. Every way this can fail comes back as a reason the
+ * settings can show — a silent failure here looks exactly like "push is
+ * on" in the browser while the server has nowhere to send to.
+ */
+export async function subscribeToPush(supabase: PigeonClient, userId: string): Promise<SubscribeResult> {
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  if (!publicKey) {
+    return {
+      ok: false,
+      reason: "Push ist in dieser App-Version nicht eingerichtet (NEXT_PUBLIC_VAPID_PUBLIC_KEY fehlt beim Build).",
+    };
+  }
+  if (!isPushSupported()) return { ok: false, reason: "Dieser Browser unterstützt keine Push-Benachrichtigungen." };
+  if (Notification.permission !== "granted") {
+    return { ok: false, reason: "Benachrichtigungen sind für diese Seite nicht erlaubt." };
+  }
+
+  const registration = await readyRegistration();
+  if (!registration) {
+    return { ok: false, reason: "Der Service Worker der App ist nicht aktiv. Lade die Seite neu und versuch es nochmal." };
+  }
+
+  let subscription: PushSubscription | null;
+  try {
+    subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+  } catch (error) {
+    return { ok: false, reason: `Browser hat das Abo abgelehnt: ${(error as Error).message}` };
   }
 
   const json = subscription.toJSON();
-  if (!json.endpoint || !json.keys) return false;
+  if (!json.endpoint || !json.keys) return { ok: false, reason: "Der Browser hat ein unvollständiges Abo geliefert." };
 
   const { error } = await supabase
     .from("push_subscriptions")
@@ -69,8 +107,28 @@ export async function subscribeToPush(supabase: PigeonClient, userId: string): P
       { user_id: userId, endpoint: json.endpoint, keys: json.keys },
       { onConflict: "endpoint", ignoreDuplicates: true }
     );
+  if (error) return { ok: false, reason: `Abo konnte nicht gespeichert werden: ${error.message}` };
 
-  return !error;
+  // ON CONFLICT DO NOTHING also "succeeds" when the endpoint is stored for
+  // another account (shared device) — only a row of our own counts.
+  if (!(await isSubscriptionStored(supabase, json.endpoint))) {
+    return {
+      ok: false,
+      reason:
+        "Dieses Gerät ist noch für ein anderes Konto registriert. Schalte Benachrichtigungen aus und wieder ein.",
+    };
+  }
+  return { ok: true };
+}
+
+/** Whether the server has this endpoint for the signed-in user (RLS: own rows only). */
+export async function isSubscriptionStored(supabase: PigeonClient, endpoint: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("push_subscriptions")
+    .select("id")
+    .eq("endpoint", endpoint)
+    .maybeSingle();
+  return !!data;
 }
 
 /** Unsubscribes and forgets *this device's* subscription (not other devices). */

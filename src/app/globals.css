@@ -206,3 +206,42 @@ body {
 .pigeon-map-shake {
   animation: pigeon-map-shake 0.5s ease-in-out;
 }
+
+/* Subtle entrance animations. Opacity/transform only, fill-mode "backwards"
+   so nothing lingers after they've played (no leftover stacking context
+   for fixed-position overlays inside). */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Page content on navigation (src/app/template.tsx), status messages. */
+.animate-fade-in {
+  animation: fade-in 200ms ease-out backwards;
+}
+
+/* Chat bubbles that arrive while the chat is open. */
+.animate-message-in {
+  animation: message-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+/* <CodeRain /> — src/components/chat/code-rain.tsx. Soft top/bottom edges. */
+.code-rain {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-message-in {
+    animation: none;
+  }
+}

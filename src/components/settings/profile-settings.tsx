@@ -18,6 +18,7 @@ import {
   redirectToLoginForExpiredSession,
 } from "@/lib/auth/session-expiry";
 import { Avatar } from "@/components/ui/avatar";
+import { IMAGE_COMPRESSION_LIB_URL } from "@/lib/image-compression";
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "system", label: "System" },
@@ -73,6 +74,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
       maxSizeMB: 0.3,
       fileType: "image/webp",
       useWebWorker: true,
+      libURL: IMAGE_COMPRESSION_LIB_URL,
     });
     // Random name per upload: the bucket is public, so the path must not
     // be guessable, and a new name also busts any cached old picture.

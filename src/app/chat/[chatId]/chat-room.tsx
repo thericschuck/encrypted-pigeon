@@ -47,6 +47,7 @@ import { ImageLightbox } from "@/components/chat/image-lightbox";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
 import { EncryptionBackdrop } from "@/components/chat/encryption-sequence";
+import { CodeRain } from "@/components/chat/code-rain";
 import { PigeonFlightMap } from "@/components/chat/pigeon-flight-map";
 import { PigeonStatusBadge } from "@/components/chat/pigeon-status-badge";
 import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
@@ -683,6 +684,22 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     return items.sort((a, b) => a.sortAt - b.sortAt);
   }, [currentUserId, flights, messages, now]);
 
+  // Only items that show up after the first render get the entrance
+  // animation — opening a chat doesn't make the whole history jump in.
+  // A key once marked entering stays marked, so re-renders mid-animation
+  // (upload progress, clock tick) don't cut it off.
+  const seenTimelineKeysRef = useRef<Set<string> | null>(null);
+  const enteringTimelineKeysRef = useRef(new Set<string>());
+  if (!seenTimelineKeysRef.current) {
+    seenTimelineKeysRef.current = new Set(timeline.map((item) => item.key));
+  }
+  for (const item of timeline) {
+    if (!seenTimelineKeysRef.current.has(item.key)) {
+      seenTimelineKeysRef.current.add(item.key);
+      enteringTimelineKeysRef.current.add(item.key);
+    }
+  }
+
   useEffect(() => {
     if (isAtBottomRef.current) scrollToBottom();
   }, [timeline, scrollToBottom]);
@@ -1175,6 +1192,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       <PushPermissionPrompt userId={currentUserId} />
       {/* The hacker show plays behind the messages, not over them. */}
       <div className="relative min-h-0 flex-1">
+        <CodeRain />
         <AnimatePresence>
           {encryptingId && (
             <EncryptionBackdrop
@@ -1207,7 +1225,10 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             </div>
           )}
           {timeline.map((item) => (
-            <div key={item.key}>
+            <div
+              key={item.key}
+              className={enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : undefined}
+            >
               {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
             </div>
           ))}

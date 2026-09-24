@@ -12,6 +12,7 @@ import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { Avatar } from "@/components/ui/avatar";
 import { LiveChatList } from "@/components/dashboard/live-chat-list";
+import { MemberManagement } from "@/components/dashboard/member-management";
 
 async function loadPendingInvites() {
   // pigeon.invites is service-role only (not readable through RLS at all).
@@ -87,28 +88,22 @@ export default async function DashboardPage() {
             <h2 className="text-sm font-semibold">Freund einladen</h2>
             <p className="mt-0.5 text-xs text-neutral-500 dark:text-night-muted">
               Schickt einen Anmeldelink. Nur eingeladene E-Mails können Encrypted Pigeon nutzen —
-              und danach mit allen aus der Gruppe schreiben.
+              und schreiben dann mit dir. Andere Mitglieder sehen sie nicht.
             </p>
           </div>
           <MagicLinkForm action={inviteUser} submitLabel="Einladen" pendingLabel="Wird versendet..." />
-          {pendingInvites.length > 0 && (
-            <div className="flex flex-col gap-1 border-t border-neutral-200 pt-3 dark:border-night-border">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-                Offene Einladungen
-              </h3>
-              <ul className="flex flex-col gap-0.5 text-sm">
-                {pendingInvites.map((invite) => (
-                  <li key={invite.email} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate">{invite.email}</span>
-                    <span className="flex-shrink-0 text-xs text-neutral-400 dark:text-night-muted">
-                      seit {new Date(invite.created_at).toLocaleDateString("de-DE")}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </section>
+      )}
+
+      {isAdmin && (
+        <MemberManagement
+          members={Array.from(
+            new Map(
+              [...overview.chats.map((chat) => chat.partner), ...overview.membersWithoutChat].map((m) => [m.id, m])
+            ).values()
+          ).sort((a, b) => a.email.localeCompare(b.email))}
+          pendingInvites={pendingInvites}
+        />
       )}
     </main>
   );
