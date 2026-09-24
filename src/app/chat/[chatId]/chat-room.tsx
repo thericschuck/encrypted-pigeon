@@ -37,7 +37,7 @@ import {
   forgetSignedUrl,
   getCachedSignedUrl,
 } from "@/lib/chat/signed-url-cache";
-import { playEncryptEnd, playEncryptStart } from "@/lib/chat/chime-sounds";
+import { playEncryptStart, playPigeonTakeoff } from "@/lib/chat/chime-sounds";
 import {
   isSessionExpiredError,
   redirectToLoginForExpiredSession,
@@ -848,7 +848,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     // audio started directly from one). Chat: the terminal "boot" chime
     // under the hacker show; letter: the take-off whoosh.
     if (kind === "chat") playEncryptStart();
-    else playEncryptEnd();
+    else playPigeonTakeoff();
 
     setDraft("");
     setAttachment(null);

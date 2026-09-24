@@ -24,6 +24,8 @@ export interface Database {
           theme: ThemePreference;
           accent_color: string | null;
           pigeon_name: string | null;
+          // { [type]: false } switches a push type off (lib/push/notification-prefs.ts).
+          notification_prefs: Record<string, boolean>;
           created_at: string;
         };
         Insert: {
@@ -34,6 +36,7 @@ export interface Database {
           theme?: ThemePreference;
           accent_color?: string | null;
           pigeon_name?: string | null;
+          notification_prefs?: Record<string, boolean>;
           created_at?: string;
         };
         Update: {
@@ -44,6 +47,7 @@ export interface Database {
           theme?: ThemePreference;
           accent_color?: string | null;
           pigeon_name?: string | null;
+          notification_prefs?: Record<string, boolean>;
           created_at?: string;
         };
         Relationships: [];

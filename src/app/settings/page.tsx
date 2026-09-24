@@ -7,6 +7,9 @@ import { ProfileSettings } from "@/components/settings/profile-settings";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { SignOutButton } from "@/components/settings/sign-out-button";
+import { SoundSettings } from "@/components/settings/sound-settings";
+import { InstallAppSettings } from "@/components/settings/install-app-settings";
+import { parseNotificationPrefs } from "@/lib/push/notification-prefs";
 
 export default async function SettingsPage() {
   const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
@@ -15,11 +18,12 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(MEMBER_PROFILE_COLUMNS)
-    .eq("id", user.id)
-    .maybeSingle();
+  // Prefs in their own query: if the notification_prefs migration isn't
+  // applied yet, only the per-type switches go missing, not the page.
+  const [{ data: profile }, { data: prefsRow, error: prefsError }] = await Promise.all([
+    supabase.from("profiles").select(MEMBER_PROFILE_COLUMNS).eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("notification_prefs").eq("id", user.id).maybeSingle(),
+  ]);
 
   // No profile = not a member (see lib/auth/bootstrap.ts); the dashboard
   // handles that case (signs out with an explanation).
@@ -52,7 +56,13 @@ export default async function SettingsPage() {
       </div>
 
       <ProfileSettings profile={profile as MemberProfile} />
-      <PushSettings userId={user.id} />
+      <PushSettings
+        userId={user.id}
+        initialPrefs={parseNotificationPrefs(prefsRow?.notification_prefs)}
+        prefsAvailable={!prefsError}
+      />
+      <SoundSettings />
+      <InstallAppSettings />
 
       <div className="mt-2">
         <SignOutButton />

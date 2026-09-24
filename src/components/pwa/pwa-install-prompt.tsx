@@ -3,41 +3,29 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isIOS, isStandalone } from "@/lib/device";
+import { promptInstall, useInstallState } from "@/lib/pwa-install";
 
 const DISMISSED_STORAGE_KEY = "pigeon-pwa-onboarding-dismissed";
 const SHOW_DELAY_MS = 1500;
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
 
 /**
  * One-time, friendly "add to home screen" nudge shown after a user's first
  * login. Device-specific instructions since there's no unified install API:
  * iOS Safari has none at all (Share -> Add to Home Screen is manual), while
- * Chrome/Android fires `beforeinstallprompt`, which we capture and trigger
- * from our own button instead of relying on the browser's own mini-infobar.
+ * Chrome/Android fires `beforeinstallprompt`, which lib/pwa-install.ts
+ * captures so our own button can trigger it (the settings page has the same
+ * button for later).
  */
 export function PwaInstallPrompt() {
   const [visible, setVisible] = useState(false);
   const [hasSession, setHasSession] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const { deferredPrompt } = useInstallState();
 
   useEffect(() => {
     const supabase = createClient();
     // Only decides whether to show the install hint — the locally stored
     // session is enough, no need for a round trip to the Auth server.
     supabase.auth.getSession().then(({ data }) => setHasSession(!!data.session));
-  }, []);
-
-  useEffect(() => {
-    function handleBeforeInstallPrompt(event: Event) {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
-    }
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   }, []);
 
   useEffect(() => {
@@ -66,10 +54,7 @@ export function PwaInstallPrompt() {
   }
 
   async function handleInstallClick() {
-    if (!deferredPrompt) return;
-    await deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    setDeferredPrompt(null);
+    await promptInstall();
     dismiss();
   }
 

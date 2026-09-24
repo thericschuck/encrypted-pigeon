@@ -23,6 +23,11 @@ import { forbiddenResponse, isServiceRoleRequest } from "../_shared/service-role
 
 type EventType = "message" | "incident" | "arrived";
 
+// Keep in sync with src/lib/push/notification-prefs.ts. Users switch types
+// off in the settings (pigeon.profiles.notification_prefs, { [type]: false });
+// a missing key means "on".
+type NotificationType = "chat" | "letter_incoming" | "letter_arrived" | "own_arrived" | "incident";
+
 interface RequestBody {
   event_type: EventType;
   message_id: string;
@@ -53,6 +58,7 @@ interface ProfileRow {
 }
 
 interface Notification {
+  type: NotificationType;
   title: string;
   body: string;
   tag: string;
@@ -100,25 +106,33 @@ function buildNotification(
     if (isSender) return null;
     if (message.kind === "pigeon") {
       return {
+        type: "letter_incoming",
         title: `🕊️ ${pigeonName ?? "Eine Brieftaube"} ist zu dir unterwegs`,
         body: `${senderName} hat dir einen Brief geschickt. Verfolge den Flug im Chat!`,
         tag: flightTag,
         url,
       };
     }
-    return { title: `💬 ${senderName}`, body: contentPreview(message), tag: `chat-${message.chat_id}`, url };
+    return {
+      type: "chat",
+      title: `💬 ${senderName}`,
+      body: contentPreview(message),
+      tag: `chat-${message.chat_id}`,
+      url,
+    };
   }
 
   if (body.event_type === "incident") {
     const label = body.event?.label ?? "Unterwegs ist etwas passiert.";
     const emoji = body.event?.emoji ?? "⚠️";
     const who = isSender ? (pigeonName ?? DEFAULT_PIGEON_NAME) : `Die Taube von ${senderName}`;
-    return { title: `🕊️ ${who}: Zwischenfall!`, body: `${emoji} ${label}`, tag: flightTag, url };
+    return { type: "incident", title: `🕊️ ${who}: Zwischenfall!`, body: `${emoji} ${label}`, tag: flightTag, url };
   }
 
   // arrived
   if (isSender) {
     return {
+      type: "own_arrived",
       title: `🕊️ ${pigeonName ?? DEFAULT_PIGEON_NAME} ist angekommen`,
       body: "Dein Brief wurde zugestellt.",
       tag: flightTag,
@@ -126,6 +140,7 @@ function buildNotification(
     };
   }
   return {
+    type: "letter_arrived",
     title: `✉️ Brief von ${senderName} ist da!`,
     body: contentPreview(message),
     tag: flightTag,
@@ -193,10 +208,25 @@ Deno.serve(async (req: Request) => {
     .eq("id", message.sender_id)
     .maybeSingle<ProfileRow>();
 
+  // Who switched which types off. A failed lookup must not swallow every
+  // push, so it falls back to "everything on".
+  const { data: prefRows, error: prefsError } = await supabase
+    .from("profiles")
+    .select("id, notification_prefs")
+    .in("id", participants.map((p) => p.user_id));
+  if (prefsError) console.error("Notification prefs lookup failed:", prefsError.message);
+  const prefsByUser = new Map(
+    ((prefRows ?? []) as { id: string; notification_prefs: Record<string, unknown> | null }[]).map(
+      (row) => [row.id, row.notification_prefs ?? {}]
+    )
+  );
+
   const notificationsByUser = new Map<string, Notification>();
   for (const { user_id } of participants) {
     const notification = buildNotification(body, message, user_id, senderProfile ?? undefined);
-    if (notification) notificationsByUser.set(user_id, notification);
+    if (!notification) continue;
+    if (prefsByUser.get(user_id)?.[notification.type] === false) continue;
+    notificationsByUser.set(user_id, notification);
   }
 
   if (notificationsByUser.size === 0) {
@@ -229,7 +259,12 @@ Deno.serve(async (req: Request) => {
           // url is relative on purpose: the service worker resolves it
           // against its own origin, so this works on localhost, previews
           // and production alike.
-          JSON.stringify(notification)
+          JSON.stringify({
+            title: notification.title,
+            body: notification.body,
+            tag: notification.tag,
+            url: notification.url,
+          })
         );
         sent += 1;
       } catch (error) {
