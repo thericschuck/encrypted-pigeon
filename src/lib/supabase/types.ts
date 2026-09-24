@@ -26,6 +26,8 @@ export interface Database {
           pigeon_name: string | null;
           // { [type]: false } switches a push type off (lib/push/notification-prefs.ts).
           notification_prefs: Record<string, boolean>;
+          // Set for the ADMIN_EMAIL account by ensureMembership(); widens profiles RLS.
+          is_admin: boolean;
           created_at: string;
         };
         Insert: {
@@ -37,6 +39,7 @@ export interface Database {
           accent_color?: string | null;
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
+          is_admin?: boolean;
           created_at?: string;
         };
         Update: {
@@ -48,6 +51,7 @@ export interface Database {
           accent_color?: string | null;
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
+          is_admin?: boolean;
           created_at?: string;
         };
         Relationships: [];

@@ -1,5 +1,5 @@
 /**
- * Text pool for <EncryptionSequence />, the in-chat "hacker" show for every
+ * Text pool for <EncryptionBackdrop />, the "hacker" show behind every
  * instant chat message (pigeon letters skip it). Every send picks a random
  * subset of MID_SEQUENCE_LINES (shuffled), then always ends with
  * TRANSMIT_LINES — extend either array for more variety, no component

@@ -13,7 +13,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, MessageKind } from "@/lib/supabase/types";
 import { ChatUploadError, uploadToBucket } from "@/lib/chat/storage-upload";
@@ -46,7 +46,7 @@ import { displayNameOf, pigeonNameOf, type MemberProfile } from "@/lib/profile";
 import { ImageLightbox } from "@/components/chat/image-lightbox";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
-import { EncryptionSequence } from "@/components/chat/encryption-sequence";
+import { EncryptionBackdrop } from "@/components/chat/encryption-sequence";
 import { PigeonFlightMap } from "@/components/chat/pigeon-flight-map";
 import { PigeonStatusBadge } from "@/components/chat/pigeon-status-badge";
 import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
@@ -177,9 +177,10 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [attachmentLoadErrors, setAttachmentLoadErrors] = useState<Record<string, string>>({});
   const [micError, setMicError] = useState<string | null>(null);
-  // Own chat messages whose hacker show is still playing in place of the
-  // bubble. Per message, so sending never waits for a previous show.
-  const [encryptingIds, setEncryptingIds] = useState<Set<string>>(() => new Set());
+  // The own chat message whose hacker show is playing in the chat
+  // background. One at a time: a new send restarts the show for the newest
+  // message (the earlier ones are already sent either way).
+  const [encryptingId, setEncryptingId] = useState<string | null>(null);
   const [openFlightMessageId, setOpenFlightMessageId] = useState<string | null>(null);
   // Coarse clock for the "noch ca. X Min" on incoming-pigeon placeholders.
   const [now, setNow] = useState(() => Date.now());
@@ -928,9 +929,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
 
     if (kind === "chat") {
       // Instant chat: the message goes out right away in the background
-      // (the recipient has it immediately); the sender sees the hacker
-      // show play where the bubble sits, which can be tapped away.
-      setEncryptingIds((prev) => new Set(prev).add(id));
+      // (the recipient has it immediately); the sender sees the bubble at
+      // once, with the hacker show playing in the chat background.
+      setEncryptingId(id);
       void performSend(id, text || null, attachmentToSend, "chat");
       return;
     }
@@ -959,13 +960,17 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   }
 
   const handleEncryptionComplete = useCallback((id: string) => {
-    setEncryptingIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+    setEncryptingId((current) => (current === id ? null : current));
   }, []);
+
+  // A failed send ends the show right away — the bubble shows the error
+  // and retry button instead.
+  const encryptingFailed = encryptingId
+    ? messages.some((m) => m.id === encryptingId && !!m.uploadError)
+    : false;
+  useEffect(() => {
+    if (encryptingFailed) setEncryptingId(null);
+  }, [encryptingFailed]);
 
   function retrySend(message: DisplayMessage) {
     void performSend(message.id, message.content, message.pendingAttachment ?? null, message.kind).then(
@@ -1006,8 +1011,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
         ? `text-white ${ownBubbleStyle ? "" : "bg-neutral-900 dark:bg-night-bubble"}`
         : "bg-neutral-100 text-neutral-900 dark:bg-night-raised dark:text-night-text";
 
-    // A failed send drops the show right away so the retry button shows.
-    const isEncrypting = encryptingIds.has(message.id) && !hasError;
+    const isEncrypting = message.id === encryptingId && !hasError;
     const bubble = (
         <div
           style={!isLetter && isOwn ? ownBubbleStyle : undefined}
@@ -1120,10 +1124,16 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
               </button>
             </div>
           )}
-          {message.pending && !hasError && !isUploading && (
-            <span className="text-xs opacity-70">
-              {isLetter ? "Brief wird übergeben…" : "Wird gesendet…"}
-            </span>
+          {isEncrypting && !isUploading ? (
+            <span className="block font-mono text-[11px] opacity-70">🔐 Wird verschlüsselt…</span>
+          ) : (
+            message.pending &&
+            !hasError &&
+            !isUploading && (
+              <span className="text-xs opacity-70">
+                {isLetter ? "Brief wird übergeben…" : "Wird gesendet…"}
+              </span>
+            )
           )}
           {isLetter && !message.pending && !hasError && (
             <PigeonStatusBadge
@@ -1135,39 +1145,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
         </div>
     );
 
-    return (
-      <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-        {isOwn && !isLetter ? (
-          <AnimatePresence mode="wait" initial={false}>
-            {isEncrypting ? (
-              <motion.div
-                key="encrypting"
-                exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: 0.2 }}
-                className="flex w-full justify-end"
-              >
-                <div className="max-w-[80%] sm:max-w-[75%]">
-                  <EncryptionSequence onComplete={() => handleEncryptionComplete(message.id)} />
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="bubble"
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.2 }}
-                onAnimationComplete={handleMediaLoaded}
-                className="flex w-full justify-end"
-              >
-                {bubble}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        ) : (
-          bubble
-        )}
-      </div>
-    );
+    return <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>{bubble}</div>;
   }
 
   function renderIncoming(flight: FlightRow) {
@@ -1195,34 +1173,45 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   return (
     <div className="flex h-full flex-col">
       <PushPermissionPrompt userId={currentUserId} />
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4"
-      >
-        {hasOlder && (
-          <div className="flex justify-center py-1">
-            <button
-              type="button"
-              onClick={() => void loadOlder()}
-              disabled={loadingOlder}
-              className="rounded-full px-3 py-1 text-xs text-neutral-400 hover:bg-neutral-100 disabled:hover:bg-transparent dark:text-night-muted dark:hover:bg-night-raised"
-            >
-              {loadingOlder ? "Ältere Nachrichten werden geladen…" : "Ältere Nachrichten laden"}
-            </button>
-          </div>
-        )}
-        {timeline.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-neutral-400 dark:text-night-muted">
-            <span className="text-3xl">🕊️</span>
-            <p>Noch keine Nachrichten. Schreib {partnerName} — oder schick gleich eine Taube!</p>
-          </div>
-        )}
-        {timeline.map((item) => (
-          <div key={item.key}>
-            {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
-          </div>
-        ))}
+      {/* The hacker show plays behind the messages, not over them. */}
+      <div className="relative min-h-0 flex-1">
+        <AnimatePresence>
+          {encryptingId && (
+            <EncryptionBackdrop
+              key={encryptingId}
+              onComplete={() => handleEncryptionComplete(encryptingId)}
+            />
+          )}
+        </AnimatePresence>
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="relative h-full space-y-2 overflow-y-auto overscroll-contain px-4 py-4"
+        >
+          {hasOlder && (
+            <div className="flex justify-center py-1">
+              <button
+                type="button"
+                onClick={() => void loadOlder()}
+                disabled={loadingOlder}
+                className="rounded-full px-3 py-1 text-xs text-neutral-400 hover:bg-neutral-100 disabled:hover:bg-transparent dark:text-night-muted dark:hover:bg-night-raised"
+              >
+                {loadingOlder ? "Ältere Nachrichten werden geladen…" : "Ältere Nachrichten laden"}
+              </button>
+            </div>
+          )}
+          {timeline.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-neutral-400 dark:text-night-muted">
+              <span className="text-3xl">🕊️</span>
+              <p>Noch keine Nachrichten. Schreib {partnerName} — oder schick gleich eine Taube!</p>
+            </div>
+          )}
+          {timeline.map((item) => (
+            <div key={item.key}>
+              {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
+            </div>
+          ))}
+        </div>
       </div>
       <div
         className={`border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-colors ${

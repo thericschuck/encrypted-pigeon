@@ -37,7 +37,7 @@ export async function ensureMembership(user: AuthUser): Promise<MembershipResult
   // would otherwise count as "not invited" and sign a real member out.
   const { data: existingProfile, error: profileError } = await admin
     .from("profiles")
-    .select("id")
+    .select("id, is_admin")
     .eq("id", user.id)
     .maybeSingle();
   if (profileError) throw profileError;
@@ -53,7 +53,9 @@ export async function ensureMembership(user: AuthUser): Promise<MembershipResult
       if (!invite) return { status: "not_invited" };
     }
 
-    const { error } = await admin.from("profiles").insert({ id: user.id, email: user.email });
+    const { error } = await admin
+      .from("profiles")
+      .insert({ id: user.id, email: user.email, is_admin: isAdmin });
     // 23505: a parallel request (e.g. two tabs) created it first — fine.
     if (error && error.code !== "23505") throw error;
 
@@ -62,7 +64,16 @@ export async function ensureMembership(user: AuthUser): Promise<MembershipResult
       .upsert({ email, accepted_at: new Date().toISOString() }, { onConflict: "email" });
   }
 
-  if (isAdmin) return { status: "member", homeChatId: null };
+  if (isAdmin) {
+    // is_admin lets the database show the admin every member (profiles
+    // RLS); everyone else only sees their chat partners. Kept in sync with
+    // ADMIN_EMAIL here rather than hard-coded in SQL.
+    if (existingProfile && !existingProfile.is_admin) {
+      const { error } = await admin.from("profiles").update({ is_admin: true }).eq("id", user.id);
+      if (error) throw error;
+    }
+    return { status: "member", homeChatId: null };
+  }
 
   const { data: adminProfile } = await admin
     .from("profiles")

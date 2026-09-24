@@ -9,9 +9,8 @@ import {
 } from "@/lib/chat/encryption-lines";
 import { playEncryptEnd, preloadChimeSounds } from "@/lib/chat/chime-sounds";
 
-interface EncryptionSequenceProps {
-  /** Fires once the full sequence (lines + closing pause) has played out,
-   * or right away when the terminal is tapped. */
+interface EncryptionBackdropProps {
+  /** Fires once the full sequence (lines + closing pause) has played out. */
   onComplete: () => void;
 }
 
@@ -64,35 +63,34 @@ const LINE_DELAY_JITTER_MS = 220;
 const PROGRESS_LINE_DELAY_MS = 850;
 const FINAL_PAUSE_MS = 550;
 
+// Light + dark variants: this sits behind the chat, on either background.
 function lineColorClass(kind: EncryptionLineTemplate["kind"]) {
   switch (kind) {
     case "warning":
-      return "text-amber-400";
+      return "text-amber-600 dark:text-amber-400";
     case "success":
-      return "text-emerald-300";
+      return "text-emerald-600 dark:text-emerald-300";
     default:
-      return "text-green-400";
+      return "text-green-700 dark:text-green-400";
   }
 }
 
-// Only the newest few lines stay visible so the in-chat terminal keeps a
-// fixed, bubble-sized height instead of growing the conversation.
-const VISIBLE_LINE_COUNT = 4;
+// Enough lines to fill the lower part of the chat; older ones scroll away
+// under the top fade.
+const VISIBLE_LINE_COUNT = 14;
 
 /**
- * The "hacker" show for one instant chat message, rendered in the chat
- * right where that message sits — the rest of the chat stays usable, and
- * several messages can each run their own sequence at the same time.
- * Starts a fresh randomized sequence on mount.
+ * The "hacker" show for an instant chat message, playing as a backdrop
+ * behind the conversation: the message itself shows up right away as a
+ * normal bubble on top, and nothing here is clickable or in the way.
+ * Starts a fresh randomized sequence on mount — give it a new `key` to
+ * restart it for the next message.
  */
-export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
+export function EncryptionBackdrop({ onComplete }: EncryptionBackdropProps) {
   const [lines] = useState(pickSequence);
   const [revealedCount, setRevealedCount] = useState(0);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  // Set by the running sequence; tapping the terminal ends it early (the
-  // message itself was already sent in the background either way).
-  const skipRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     preloadChimeSounds();
@@ -112,7 +110,6 @@ export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
         timers.push(
           setTimeout(() => {
             if (cancelled) return;
-            cancelled = true;
             playEncryptEnd();
             onCompleteRef.current();
           }, FINAL_PAUSE_MS)
@@ -127,19 +124,11 @@ export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
       timers.push(setTimeout(() => showLine(index + 1), delay));
     }
 
-    timers.push(setTimeout(() => showLine(0), 200));
-
-    skipRef.current = () => {
-      if (cancelled) return;
-      cancelled = true;
-      timers.forEach(clearTimeout);
-      onCompleteRef.current();
-    };
+    timers.push(setTimeout(() => showLine(0), 150));
 
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
-      skipRef.current = null;
     };
   }, [lines]);
 
@@ -150,18 +139,22 @@ export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
   );
 
   return (
-    <button
-      type="button"
-      onClick={() => skipRef.current?.()}
-      aria-label="Nachricht wird verschlüsselt — tippen zum Überspringen"
-      className="encryption-scanlines relative block w-72 max-w-full cursor-pointer overflow-hidden rounded-2xl border border-green-900/60 bg-black px-3 py-2 text-left font-mono text-[11px] leading-snug shadow-[0_0_24px_rgba(0,255,140,0.08)]"
+    <motion.div
+      aria-hidden="true"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.5, ease: "easeInOut" }}
+      className="encryption-scanlines pointer-events-none absolute inset-0 overflow-hidden bg-[radial-gradient(ellipse_at_bottom,rgba(16,185,129,0.08),transparent_70%)]"
     >
-      <div className="mb-1.5 flex items-center gap-1.5 border-b border-green-900/60 pb-1 text-[10px] text-green-600">
-        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-        PIGEON_SECURE_CHANNEL v3.0
-      </div>
-      {/* Fixed height: 4 lines, a progress line takes two. */}
-      <div role="status" className="flex h-[6.5rem] flex-col justify-end gap-1 overflow-hidden">
+      <div
+        className="absolute inset-x-0 bottom-0 flex max-h-full flex-col justify-end gap-1 px-4 pb-4 font-mono text-[11px] leading-snug opacity-50 sm:text-xs dark:opacity-40"
+        style={{ maskImage: "linear-gradient(to top, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to top, black 55%, transparent)" }}
+      >
+        <div className="mb-1 flex items-center gap-1.5 text-[10px] text-green-700 dark:text-green-600">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+          PIGEON_SECURE_CHANNEL v3.0
+        </div>
         {visibleLines.map((line, offset) => (
           <motion.div
             key={firstVisible + offset}
@@ -174,7 +167,7 @@ export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
           >
             {line.kind === "progress" ? (
               <>
-                <div className="truncate">{`> ${line.text}`}</div>
+                <div>{`> ${line.text}`}</div>
                 <AsciiProgressBar durationMs={PROGRESS_LINE_DELAY_MS - 100} />
               </>
             ) : (
@@ -185,9 +178,9 @@ export function EncryptionSequence({ onComplete }: EncryptionSequenceProps) {
         <motion.span
           animate={{ opacity: [1, 0, 1] }}
           transition={{ duration: 1, repeat: Infinity }}
-          className="inline-block h-3 w-1.5 flex-shrink-0 bg-green-500"
+          className="inline-block h-3 w-1.5 flex-shrink-0 bg-green-600 dark:bg-green-500"
         />
       </div>
-    </button>
+    </motion.div>
   );
 }

@@ -116,7 +116,7 @@ body {
   }
 }
 
-/* <EncryptionSequence /> terminal effects (in-chat, per message) — see src/components/chat/encryption-sequence.tsx */
+/* <EncryptionBackdrop /> terminal effects (chat background) — see src/components/chat/encryption-sequence.tsx */
 @keyframes encryption-scanline-move {
   0% {
     background-position: 0 0;
