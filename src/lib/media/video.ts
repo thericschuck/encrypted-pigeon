@@ -1,9 +1,11 @@
 // Client-side video processing for chat videos: re-encode to H.264/AAC
 // MP4 at a resolution and bitrate that keep the file under the bucket
-// limit — so a 4K iPhone clip (HEVC .mov, hundreds of MB) arrives as a
-// small MP4 that plays in every browser. Uses WebCodecs via mediabunny,
-// which uses the device's hardware encoder, so it runs faster than
-// real time on most phones. Lazy-loaded: only needed once a video is sent.
+// limit — so a clip of any size or length (a 4K iPhone HEVC .mov of
+// several GB, an hour-long recording) arrives as an MP4 below 50 MB that
+// plays in every browser. Uses WebCodecs via mediabunny, which uses the
+// device's hardware encoder and reads the input lazily (the original is
+// never loaded into memory as a whole). Lazy-loaded: only needed once a
+// video is sent.
 
 import { fileExtension } from "./image";
 
@@ -15,15 +17,19 @@ export interface ProcessedVideo {
 
 /** Must stay below the pigeon-chat-videos bucket limit (50 MB). */
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
-// Budget for the re-encoded file, with headroom for container overhead
-// and encoders that overshoot their target bitrate.
-const TARGET_BYTES = 40 * 1024 * 1024;
+// Budget for the first attempt, with headroom for container overhead and
+// encoders that overshoot their target bitrate. If the result still ends
+// up too big, the next attempt aims lower by exactly the overshoot.
+const TARGET_BYTES = 42 * 1024 * 1024;
+const MAX_ATTEMPTS = 3;
 // Small, already browser-friendly clips are sent untouched.
 const PASSTHROUGH_MAX_BYTES = 8 * 1024 * 1024;
 const PASSTHROUGH_TYPES = ["video/mp4", "video/webm"];
 
 const MAX_VIDEO_BITRATE = 2_500_000;
-const MIN_VIDEO_BITRATE = 80_000;
+// Below this even a tiny picture turns to mush; longer videos get fewer
+// frames per second instead (see settingsFor).
+const MIN_VIDEO_BITRATE = 40_000;
 
 const VIDEO_EXTENSIONS = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "3gp", "ogv", "wmv", "mpg", "mpeg", "ts"];
 
@@ -33,16 +39,27 @@ export function looksLikeVideo(file: File): boolean {
 
 export class VideoTooLargeError extends Error {}
 
-function longSideFor(videoBitrate: number): number {
-  if (videoBitrate >= 1_500_000) return 1280;
-  if (videoBitrate >= 700_000) return 960;
-  if (videoBitrate >= 350_000) return 640;
-  return 480;
+/** Resolution, frame rate and audio quality that suit a given bit budget. */
+function settingsFor(totalBitrate: number) {
+  const audioBitrate = totalBitrate >= 600_000 ? 96_000 : totalBitrate >= 150_000 ? 48_000 : 24_000;
+  const videoBitrate = Math.max(MIN_VIDEO_BITRATE, Math.min(MAX_VIDEO_BITRATE, totalBitrate - audioBitrate));
+  const longSide =
+    videoBitrate >= 1_500_000 ? 1280
+    : videoBitrate >= 700_000 ? 960
+    : videoBitrate >= 350_000 ? 640
+    : videoBitrate >= 150_000 ? 480
+    : 360;
+  const frameRate = videoBitrate >= 300_000 ? undefined : videoBitrate >= 120_000 ? 24 : 15;
+  return { audioBitrate, videoBitrate, longSide, frameRate };
 }
 
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
-async function transcode(file: File, onProgress?: (fraction: number) => void): Promise<ProcessedVideo> {
+async function transcode(
+  file: File,
+  targetBytes: number,
+  onProgress?: (fraction: number) => void
+): Promise<ProcessedVideo> {
   const { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output, Quality } =
     await import("mediabunny");
 
@@ -54,13 +71,8 @@ async function transcode(file: File, onProgress?: (fraction: number) => void): P
     const width = await videoTrack.getDisplayWidth();
     const height = await videoTrack.getDisplayHeight();
 
-    // Long videos trade quality for fitting at all (~1 h still goes through).
-    const audioBitrate = duration > 20 * 60 ? 48_000 : 96_000;
-    const videoBitrate = Math.max(
-      MIN_VIDEO_BITRATE,
-      Math.min(MAX_VIDEO_BITRATE, (TARGET_BYTES * 8) / duration - audioBitrate)
-    );
-    const scale = Math.min(1, longSideFor(videoBitrate) / Math.max(width, height));
+    const { audioBitrate, videoBitrate, longSide, frameRate } = settingsFor((targetBytes * 8) / duration);
+    const scale = Math.min(1, longSide / Math.max(width, height));
 
     const run = async (audioCodec: "aac" | "opus") => {
       const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() });
@@ -74,6 +86,7 @@ async function transcode(file: File, onProgress?: (fraction: number) => void): P
           fit: "contain",
           codec: "avc",
           quality: new Quality(videoBitrate),
+          ...(frameRate ? { frameRate } : {}),
           forceTranscode: true,
         },
         audio: { codec: audioCodec, quality: new Quality(audioBitrate), numberOfChannels: 2 },
@@ -106,21 +119,41 @@ function asIs(file: File): ProcessedVideo {
   return { blob: file, contentType: file.type || `video/${extension === "mov" ? "quicktime" : extension}`, extension };
 }
 
+// A long conversion on a phone must not be cut short by the screen
+// locking itself (which suspends the page). Best effort.
+async function keepScreenOn(): Promise<() => void> {
+  try {
+    const lock = await navigator.wakeLock?.request("screen");
+    return () => void lock?.release().catch(() => {});
+  } catch {
+    return () => {};
+  }
+}
+
 export async function processVideo(file: File, onProgress?: (fraction: number) => void): Promise<ProcessedVideo> {
   if (file.size <= PASSTHROUGH_MAX_BYTES && PASSTHROUGH_TYPES.includes(file.type)) return asIs(file);
 
+  const releaseScreen = await keepScreenOn();
   try {
-    const result = await transcode(file, onProgress);
-    // Re-encoding can't beat an already tiny file — keep the smaller one.
-    if (result.blob.size >= file.size && file.size <= MAX_VIDEO_BYTES) return asIs(file);
-    if (result.blob.size > MAX_VIDEO_BYTES) throw new VideoTooLargeError();
-    return result;
+    let targetBytes = TARGET_BYTES;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const result = await transcode(file, targetBytes, onProgress);
+      // Re-encoding can't beat an already small file — keep the smaller one.
+      if (result.blob.size >= file.size && file.size <= MAX_VIDEO_BYTES) return asIs(file);
+      if (result.blob.size <= MAX_VIDEO_BYTES) return result;
+      // Encoder overshot: aim lower by the overshoot, plus some margin.
+      targetBytes = Math.floor(targetBytes * (TARGET_BYTES / result.blob.size) * 0.9);
+      onProgress?.(0);
+    }
+    throw new VideoTooLargeError();
   } catch (error) {
     // No WebCodecs (older browsers) or a codec the device can't decode:
     // the original still works if it fits.
     if (file.size <= MAX_VIDEO_BYTES) return asIs(file);
     if (error instanceof VideoTooLargeError) throw error;
     console.error("Video conversion failed:", error);
-    throw new VideoTooLargeError();
+    throw new VideoTooLargeError("unsupported");
+  } finally {
+    releaseScreen();
   }
 }

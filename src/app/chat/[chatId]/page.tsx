@@ -21,10 +21,16 @@ export default async function ChatPage({ params }: ChatPageProps) {
 
   // RLS on chat_participants only returns rows for chats the current user
   // is actually part of, so an empty result also covers "not your chat".
-  const { data: participants } = await supabase
+  const { data: participants, error: participantsError } = await supabase
     .from("chat_participants")
     .select("user_id, last_read_at")
     .eq("chat_id", params.chatId);
+  // A failed query is not "no such chat": let error.tsx show it (with a
+  // retry) instead of hiding e.g. a missing column behind a 404.
+  // 22P02 = the id in the URL isn't even a valid uuid, a genuine 404.
+  if (participantsError && participantsError.code !== "22P02") {
+    throw new Error(`Chat konnte nicht geladen werden: ${participantsError.message}`);
+  }
 
   const isParticipant = participants?.some((p) => p.user_id === user.id);
   if (!participants || !isParticipant) {

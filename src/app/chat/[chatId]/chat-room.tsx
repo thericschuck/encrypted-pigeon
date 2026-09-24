@@ -937,7 +937,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             : error instanceof ChatUploadError
               ? error.message
               : error instanceof VideoTooLargeError
-                ? "Video ist zu lang und ließ sich nicht klein genug rechnen."
+                ? error.message === "unsupported"
+                  ? "Dieser Browser kann das Video nicht verkleinern. Bitte Browser aktualisieren oder anderes Gerät nutzen."
+                  : "Video ist zu lang (über ca. 1,5 Std.), um es klein genug zu rechnen."
                 : "Upload fehlgeschlagen. Bitte erneut versuchen.";
         updateMessage(id, { uploadError: message, uploadProgress: undefined });
         return false;
