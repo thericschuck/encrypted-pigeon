@@ -98,6 +98,12 @@ const BOTTOM_THRESHOLD_PX = 80;
 // How close to the top (px) starts loading the next older page, so it's
 // usually there before the user actually reaches the top.
 const LOAD_OLDER_THRESHOLD_PX = 400;
+// Back from the background after this long: catch up even if the realtime
+// socket looks fine. Shorter than the chat list's 5 min — missing a message
+// in the open chat matters more.
+const RESYNC_AFTER_HIDDEN_MS = 60 * 1000;
+// Collapses simultaneous catch-up triggers into one resync.
+const RESYNC_DEBOUNCE_MS = 500;
 
 function sendErrorMessage(): string {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -436,6 +442,35 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     let channel: ReturnType<typeof supabase.channel> | undefined;
     let cancelled = false;
     let hasSubscribedOnce = false;
+    let hiddenSince: number | null = null;
+    let resyncTimer: ReturnType<typeof setTimeout> | undefined;
+    let resyncRunning = false;
+    let resyncAgain = false;
+
+    // All catch-up triggers (reconnect, back online, back from background)
+    // go through here: bursts collapse into one resync (going back online
+    // usually also means a realtime reconnect), and a resync never runs
+    // twice in parallel — one requested meanwhile runs once afterwards.
+    function scheduleResync() {
+      if (resyncTimer) clearTimeout(resyncTimer);
+      resyncTimer = setTimeout(async () => {
+        if (cancelled) return;
+        if (resyncRunning) {
+          resyncAgain = true;
+          return;
+        }
+        resyncRunning = true;
+        try {
+          await resync();
+        } finally {
+          resyncRunning = false;
+          if (resyncAgain && !cancelled) {
+            resyncAgain = false;
+            scheduleResync();
+          }
+        }
+      }, RESYNC_DEBOUNCE_MS);
+    }
 
     // createClient()'s session is restored from cookies asynchronously; if
     // the channel subscribes before that finishes, "postgres_changes"
@@ -476,22 +511,31 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           // Every SUBSCRIBED after the first one is a reconnect — anything
           // sent in between never reached us as an event.
           if (status === "SUBSCRIBED") {
-            if (hasSubscribedOnce) void resync();
+            if (hasSubscribedOnce) scheduleResync();
             hasSubscribedOnce = true;
           }
         });
     });
 
+    // A short tab switch leaves the socket connected (and if it did drop,
+    // the reconnect above resyncs anyway) — only a longer background
+    // stretch is worth a catch-up query on its own.
     function handleVisibilityChange() {
-      if (document.visibilityState === "visible") void resync();
+      if (document.visibilityState === "hidden") {
+        hiddenSince = Date.now();
+        return;
+      }
+      if (hiddenSince !== null && Date.now() - hiddenSince > RESYNC_AFTER_HIDDEN_MS) scheduleResync();
+      hiddenSince = null;
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("online", resync);
+    window.addEventListener("online", scheduleResync);
 
     return () => {
       cancelled = true;
+      if (resyncTimer) clearTimeout(resyncTimer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("online", resync);
+      window.removeEventListener("online", scheduleResync);
       if (channel) supabase.removeChannel(channel);
     };
   }, [appendServerMessages, chatId, mergeFlights, resync]);

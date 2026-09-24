@@ -1,4 +1,5 @@
 import type { ChatListItem } from "@/lib/chat/chat-overview";
+import type { MemberProfile } from "@/lib/profile";
 
 type LastMessage = NonNullable<ChatListItem["lastMessage"]>;
 
@@ -21,6 +22,27 @@ function isNewer(candidate: LastMessage, current: LastMessage | null | undefined
 
 export function noteChatActivity(chatId: string, message: LastMessage) {
   if (isNewer(message, latestByChat.get(chatId))) latestByChat.set(chatId, message);
+}
+
+// The most recent full list any <LiveChatList /> showed, so the chat
+// sidebar can start from it when coming from the dashboard.
+let rememberedList: {
+  chats: ChatListItem[];
+  membersWithoutChat: MemberProfile[];
+  at: number;
+} | null = null;
+
+export function rememberChatList(chats: ChatListItem[], membersWithoutChat: MemberProfile[]) {
+  rememberedList = { chats, membersWithoutChat, at: Date.now() };
+}
+
+/** The remembered list if it's younger than maxAgeMs (and merged with activity since). */
+export function recallChatList(maxAgeMs: number) {
+  if (!rememberedList || Date.now() - rememberedList.at > maxAgeMs) return null;
+  return {
+    chats: withLatestActivity(rememberedList.chats),
+    membersWithoutChat: rememberedList.membersWithoutChat,
+  };
 }
 
 /** Server list + everything seen since, newest activity first. */

@@ -21,13 +21,11 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 interface PushSettingsProps {
   userId: string;
   initialPrefs: NotificationPrefs;
-  /** False until the notification_prefs migration is applied. */
-  prefsAvailable: boolean;
 }
 
 type Status = "loading" | "unsupported" | "ios-not-installed" | "denied" | "off" | "on";
 
-export function PushSettings({ userId, initialPrefs, prefsAvailable }: PushSettingsProps) {
+export function PushSettings({ userId, initialPrefs }: PushSettingsProps) {
   const [status, setStatus] = useState<Status>("loading");
   const [busy, setBusy] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPrefs>(initialPrefs);
@@ -147,33 +145,31 @@ export function PushSettings({ userId, initialPrefs, prefsAvailable }: PushSetti
         )}
       </div>
 
-      {prefsAvailable && (
-        <div className="mt-4 border-t border-neutral-200 pt-3 dark:border-night-border">
-          <p className="text-xs text-neutral-500 dark:text-night-muted">
-            Worüber du benachrichtigt wirst — gilt für alle deine Geräte.
+      <div className="mt-4 border-t border-neutral-200 pt-3 dark:border-night-border">
+        <p className="text-xs text-neutral-500 dark:text-night-muted">
+          Worüber du benachrichtigt wirst — gilt für alle deine Geräte.
+        </p>
+        <ul className="mt-3 flex flex-col gap-3">
+          {NOTIFICATION_OPTIONS.map((option) => (
+            <li key={option.type} className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-neutral-900 dark:text-night-text">{option.label}</p>
+                <p className="text-xs text-neutral-500 dark:text-night-muted">{option.description}</p>
+              </div>
+              <ToggleSwitch
+                checked={isNotificationEnabled(prefs, option.type)}
+                onChange={(on) => void setType(option.type, on)}
+                label={option.label}
+              />
+            </li>
+          ))}
+        </ul>
+        {prefsError && (
+          <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+            {prefsError}
           </p>
-          <ul className="mt-3 flex flex-col gap-3">
-            {NOTIFICATION_OPTIONS.map((option) => (
-              <li key={option.type} className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-neutral-900 dark:text-night-text">{option.label}</p>
-                  <p className="text-xs text-neutral-500 dark:text-night-muted">{option.description}</p>
-                </div>
-                <ToggleSwitch
-                  checked={isNotificationEnabled(prefs, option.type)}
-                  onChange={(on) => void setType(option.type, on)}
-                  label={option.label}
-                />
-              </li>
-            ))}
-          </ul>
-          {prefsError && (
-            <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
-              {prefsError}
-            </p>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

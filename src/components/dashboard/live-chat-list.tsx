@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 import { previewOf, type ChatListItem } from "@/lib/chat/chat-overview";
-import { noteChatActivity, sortByActivity, withLatestActivity } from "@/lib/chat/chat-list-store";
+import {
+  noteChatActivity,
+  rememberChatList,
+  sortByActivity,
+  withLatestActivity,
+} from "@/lib/chat/chat-list-store";
 import type { MemberProfile } from "@/lib/profile";
 import { ChatList } from "@/components/dashboard/chat-list";
 
@@ -28,6 +33,13 @@ interface LiveChatListProps {
    * hidden below md, so keeping it live there would be wasted traffic.
    */
   media?: string;
+  /**
+   * How to get a fresh list from the server when events may have been
+   * missed. Defaults to router.refresh() (server-rendered list); the chat
+   * sidebar loads its list in the browser and reloads just that instead of
+   * re-rendering the whole chat route.
+   */
+  onStale?: () => void;
 }
 
 /**
@@ -41,8 +53,10 @@ interface LiveChatListProps {
  * RLS decides which rows arrive, so this never sees other people's chats
  * or the content of letters still in flight.
  */
-export function LiveChatList({ userId, chats, membersWithoutChat, media }: LiveChatListProps) {
+export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale }: LiveChatListProps) {
   const router = useRouter();
+  const onStaleRef = useRef(onStale);
+  onStaleRef.current = onStale;
   const [items, setItems] = useState(() => withLatestActivity(chats));
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -52,6 +66,16 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media }: LiveC
   useEffect(() => {
     setItems(withLatestActivity(chats));
   }, [chats]);
+
+  // Lets the next list that mounts (dashboard → chat sidebar) start from
+  // this state instead of loading it again.
+  useEffect(() => {
+    rememberChatList(items, membersWithoutChat);
+  }, [items, membersWithoutChat]);
+  // …stamped again on unmount: up to that moment it was live, not stale.
+  const membersRef = useRef(membersWithoutChat);
+  membersRef.current = membersWithoutChat;
+  useEffect(() => () => rememberChatList(itemsRef.current, membersRef.current), []);
 
   useEffect(() => {
     if (media && !window.matchMedia(media).matches) return;
@@ -64,7 +88,7 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media }: LiveC
 
     function scheduleRefresh() {
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => router.refresh(), REFRESH_DEBOUNCE_MS);
+      refreshTimer = setTimeout(() => (onStaleRef.current ?? router.refresh)(), REFRESH_DEBOUNCE_MS);
     }
 
     const isKnownChat = (chatId: string | null) =>

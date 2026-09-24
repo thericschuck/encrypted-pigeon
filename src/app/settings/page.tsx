@@ -18,12 +18,11 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  // Prefs in their own query: if the notification_prefs migration isn't
-  // applied yet, only the per-type switches go missing, not the page.
-  const [{ data: profile }, { data: prefsRow, error: prefsError }] = await Promise.all([
-    supabase.from("profiles").select(MEMBER_PROFILE_COLUMNS).eq("id", user.id).maybeSingle(),
-    supabase.from("profiles").select("notification_prefs").eq("id", user.id).maybeSingle(),
-  ]);
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(`${MEMBER_PROFILE_COLUMNS}, notification_prefs`)
+    .eq("id", user.id)
+    .maybeSingle();
 
   // No profile = not a member (see lib/auth/bootstrap.ts); the dashboard
   // handles that case (signs out with an explanation).
@@ -58,8 +57,7 @@ export default async function SettingsPage() {
       <ProfileSettings profile={profile as MemberProfile} />
       <PushSettings
         userId={user.id}
-        initialPrefs={parseNotificationPrefs(prefsRow?.notification_prefs)}
-        prefsAvailable={!prefsError}
+        initialPrefs={parseNotificationPrefs(profile.notification_prefs)}
       />
       <SoundSettings />
       <InstallAppSettings />
