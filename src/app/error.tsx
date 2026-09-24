@@ -30,7 +30,7 @@ export default function GlobalError({
         <button
           type="button"
           onClick={reset}
-          className="rounded-full bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-night-accent dark:text-night-bg"
+          className="rounded-full bg-accent px-4 py-2 text-sm text-on-accent"
         >
           Erneut versuchen
         </button>

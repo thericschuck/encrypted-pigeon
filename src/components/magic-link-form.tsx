@@ -28,7 +28,7 @@ function SubmitButton({
     <button
       type="submit"
       disabled={pending}
-      className="rounded bg-neutral-900 px-3 py-2 text-white disabled:opacity-50 dark:bg-night-accent dark:text-night-bg"
+      className="rounded bg-accent px-3 py-2 text-on-accent disabled:opacity-50"
     >
       {pending ? pendingLabel : label}
     </button>

@@ -20,6 +20,10 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        // The user's accent color (src/lib/accent.ts, defaults in globals.css).
+        accent: "color-mix(in srgb, var(--accent) calc(<alpha-value> * 100%), transparent)",
+        "on-accent": "var(--accent-fg)",
+        bubble: "var(--bubble)",
         // Dark-mode palette: the light theme's parchment/terracotta
         // (#f7f0df / #c1643a / #5c4a37, see the flight map and PWA prompt)
         // carried over into warm, low-glare browns instead of a cold grey.

@@ -51,6 +51,7 @@ interface MessageRow {
   content: string | null;
   image_url: string | null;
   audio_url: string | null;
+  video_url: string | null;
 }
 
 interface ProfileRow {
@@ -66,6 +67,8 @@ interface Notification {
   body: string;
   tag: string;
   url: string;
+  /** Unread messages in total — the number on the app icon. */
+  badge?: number;
 }
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY");
@@ -81,12 +84,13 @@ function truncate(text: string, max: number): string {
 }
 
 function displayName(profile: ProfileRow | undefined): string {
-  return profile?.display_name ?? profile?.email.split("@")[0] ?? "Jemand";
+  return profile?.display_name?.trim() || profile?.email.split("@")[0] || "Jemand";
 }
 
 function contentPreview(message: MessageRow): string {
   if (message.content) return truncate(message.content, 120);
   if (message.image_url) return "📷 Bild";
+  if (message.video_url) return "🎬 Video";
   if (message.audio_url) return "🎤 Sprachnachricht";
   return "Neue Nachricht";
 }
@@ -101,7 +105,7 @@ function buildNotification(
   const url = `/chat/${message.chat_id}`;
   const isSender = targetUserId === message.sender_id;
   const senderName = displayName(sender);
-  const pigeonName = sender?.pigeon_name ?? null;
+  const pigeonName = sender?.pigeon_name?.trim() || null;
   const flightTag = `flight-${body.message_id}`;
 
   if (body.event_type === "message") {
@@ -209,7 +213,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: message, error: messageError } = await supabase
     .from("messages")
-    .select("chat_id, sender_id, kind, content, image_url, audio_url")
+    .select("chat_id, sender_id, kind, content, image_url, audio_url, video_url")
     .eq("id", body.message_id)
     .maybeSingle<MessageRow>();
 
@@ -220,8 +224,9 @@ Deno.serve(async (req: Request) => {
 
   const { data: participants, error: participantsError } = await supabase
     .from("chat_participants")
-    .select("user_id")
-    .eq("chat_id", message.chat_id);
+    .select("user_id, viewing_until")
+    .eq("chat_id", message.chat_id)
+    .returns<{ user_id: string; viewing_until: string | null }[]>();
 
   if (participantsError || !participants) {
     console.error("Participants lookup failed:", participantsError?.message);
@@ -248,12 +253,26 @@ Deno.serve(async (req: Request) => {
   );
 
   const notificationsByUser = new Map<string, Notification>();
-  for (const { user_id } of participants) {
+  const now = Date.now();
+  for (const { user_id, viewing_until } of participants) {
+    // Has this very chat open and visible right now (heartbeat from the
+    // app): they see it happen live, a push on top would only be noise.
+    if (viewing_until && Date.parse(viewing_until) > now) continue;
     const notification = buildNotification(body, message, user_id, senderProfile ?? undefined);
     if (!notification) continue;
     if (prefsByUser.get(user_id)?.[notification.type] === false) continue;
     notificationsByUser.set(user_id, notification);
   }
+
+  // The app icon badge (installed PWA): unread messages in total. Optional —
+  // a failed lookup just sends the push without it.
+  await Promise.all(
+    Array.from(notificationsByUser.entries()).map(async ([userId, notification]) => {
+      const { data, error } = await supabase.rpc("unread_total_for_user", { p_user_id: userId });
+      if (error) console.error("Unread total lookup failed:", error.message);
+      else if (typeof data === "number") notification.badge = data;
+    })
+  );
 
   return sendToUsers(supabase, notificationsByUser);
 });
@@ -298,15 +317,18 @@ async function sendToUsers(
             body: notification.body,
             tag: notification.tag,
             url: notification.url,
+            type: notification.type,
+            badge: notification.badge,
           })
         );
         sent += 1;
       } catch (error) {
         failed += 1;
         const statusCode = (error as { statusCode?: number }).statusCode;
-        if (statusCode === 404 || statusCode === 410) {
-          // Subscription expired or was revoked on the browser side — clean
-          // it up so we stop trying.
+        if (statusCode === 404 || statusCode === 410 || statusCode === 403) {
+          // 404/410: expired or revoked on the browser side. 403: made with
+          // a different VAPID key (key was rotated) — it can never work
+          // again. Clean up; the app subscribes afresh on its next start.
           staleSubscriptionIds.push(subscription.id);
         } else {
           console.error("Push send failed:", error);

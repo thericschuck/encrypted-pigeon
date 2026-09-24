@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import { AVATAR_BUCKET } from "@/lib/profile";
-import { CHAT_IMAGE_BUCKET, CHAT_VOICE_BUCKET } from "@/lib/chat/buckets";
+import { CHAT_IMAGE_BUCKET, CHAT_VIDEO_BUCKET, CHAT_VOICE_BUCKET } from "@/lib/chat/buckets";
 
 export type AdminActionResult = { status: "ok"; message: string } | { status: "error"; message: string };
 
@@ -56,15 +56,17 @@ export async function deleteMember(userId: string): Promise<AdminActionResult> {
 
   const imagePaths: string[] = [];
   const voicePaths: string[] = [];
+  const videoPaths: string[] = [];
   if (chatIds.length > 0) {
     const { data: attachments, error: attachmentsError } = await admin
       .from("messages")
-      .select("image_url, audio_url")
+      .select("image_url, audio_url, video_url")
       .in("chat_id", chatIds);
     if (attachmentsError) return { status: "error", message: attachmentsError.message };
     for (const m of attachments ?? []) {
       if (m.image_url) imagePaths.push(m.image_url);
       if (m.audio_url) voicePaths.push(m.audio_url);
+      if (m.video_url) videoPaths.push(m.video_url);
     }
   }
   const { data: avatarFiles } = await admin.storage.from(AVATAR_BUCKET).list(userId);
@@ -87,6 +89,7 @@ export async function deleteMember(userId: string): Promise<AdminActionResult> {
   for (const [bucket, paths] of [
     [CHAT_IMAGE_BUCKET, imagePaths],
     [CHAT_VOICE_BUCKET, voicePaths],
+    [CHAT_VIDEO_BUCKET, videoPaths],
     [AVATAR_BUCKET, avatarPaths],
   ] as const) {
     if (paths.length === 0) continue;

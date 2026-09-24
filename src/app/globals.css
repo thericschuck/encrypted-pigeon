@@ -5,6 +5,12 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Primary buttons/switches and own chat bubbles. A custom accent
+     (settings) overrides all three via an inline style on <html>, see
+     src/lib/accent.ts. */
+  --accent: #171717;
+  --accent-fg: #ffffff;
+  --bubble: #171717;
   color-scheme: light;
 }
 
@@ -16,6 +22,9 @@
   :root:not(.light) {
     --background: #17130f;
     --foreground: #eee4cf;
+    --accent: #d9774b;
+    --accent-fg: #17130f;
+    --bubble: #9c4f2c;
     color-scheme: dark;
   }
 }
@@ -23,6 +32,9 @@
 :root.dark {
   --background: #17130f;
   --foreground: #eee4cf;
+  --accent: #d9774b;
+  --accent-fg: #17130f;
+  --bubble: #9c4f2c;
   color-scheme: dark;
 }
 

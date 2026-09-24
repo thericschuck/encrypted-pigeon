@@ -19,9 +19,12 @@ import type { Database, MessageKind } from "@/lib/supabase/types";
 import { ChatUploadError, uploadToBucket } from "@/lib/chat/storage-upload";
 import {
   CHAT_IMAGE_BUCKET,
-  buildChatImagePath,
+  buildChatAttachmentPath,
   compressChatImage,
 } from "@/lib/chat/image-upload";
+import { CHAT_VIDEO_BUCKET } from "@/lib/chat/buckets";
+import { looksLikeImage } from "@/lib/media/image";
+import { VideoTooLargeError, looksLikeVideo, processVideo } from "@/lib/media/video";
 import {
   CHAT_VOICE_BUCKET,
   baseMimeType,
@@ -48,6 +51,8 @@ import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
 import { EncryptionBackdrop } from "@/components/chat/encryption-sequence";
 import { CodeRain } from "@/components/chat/code-rain";
+import { NewMessagesButton, UnreadDivider } from "@/components/chat/unread-markers";
+import { useChatReadState } from "@/lib/chat/use-chat-read-state";
 import { PigeonFlightMap } from "@/components/chat/pigeon-flight-map";
 import { PigeonStatusBadge } from "@/components/chat/pigeon-status-badge";
 import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
@@ -57,6 +62,7 @@ type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
 
 type PendingAttachment =
   | { kind: "image"; file: File; previewUrl: string }
+  | { kind: "video"; file: File; previewUrl: string }
   | { kind: "voice"; blob: Blob; previewUrl: string; durationSeconds: number; mimeType: string };
 
 type DisplayMessage = MessageRow & {
@@ -64,11 +70,14 @@ type DisplayMessage = MessageRow & {
   // Present (0-100) while an attachment is uploading; undefined once the
   // message is fully sent or before any attachment finishes.
   uploadProgress?: number;
+  /** What uploadProgress measures: shrinking the file first, then sending it. */
+  uploadPhase?: "processing" | "uploading";
   uploadError?: string;
   // Local object URLs, kept around so we can show an instant preview and
   // support "retry" without re-picking the file / re-recording.
   localImagePreview?: string;
   localAudioPreview?: string;
+  localVideoPreview?: string;
   pendingAttachment?: PendingAttachment;
 };
 
@@ -86,6 +95,8 @@ interface ChatRoomProps {
   initialMessages: MessageRow[];
   /** Whether there are messages older than initialMessages. */
   initialHasOlder: boolean;
+  /** Up to when I had read this chat before opening it ("Neue Nachrichten" line). */
+  initialLastReadAt: string | null;
 }
 
 interface StorageRef {
@@ -165,7 +176,11 @@ function ChatImage({
   );
 }
 
-export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder }: ChatRoomProps) {
+function isPartnerMessage(item: TimelineItem, currentUserId: string) {
+  return item.type === "message" && item.message.sender_id !== currentUserId;
+}
+
+export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder, initialLastReadAt }: ChatRoomProps) {
   const currentUserId = me.id;
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [flights, setFlights] = useState<Record<string, FlightRow>>({});
@@ -177,7 +192,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [attachmentLoadErrors, setAttachmentLoadErrors] = useState<Record<string, string>>({});
-  const [micError, setMicError] = useState<string | null>(null);
+  const [composerError, setComposerError] = useState<string | null>(null);
   // The own chat message whose hacker show is playing in the chat
   // background. One at a time: a new send restarts the show for the newest
   // message (the earlier ones are already sent either way).
@@ -218,7 +233,6 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   const partnerName = displayNameOf(partner);
   const myPigeonName = pigeonNameOf(me);
   const partnerPigeonName = pigeonNameOf(partner);
-  const ownBubbleStyle = me.accent_color ? { backgroundColor: me.accent_color } : undefined;
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -649,6 +663,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       if (m.audio_url && !requestedSignedUrlPaths.current.has(m.audio_url)) {
         refs.push({ bucket: CHAT_VOICE_BUCKET, path: m.audio_url });
       }
+      if (m.video_url && !requestedSignedUrlPaths.current.has(m.video_url)) {
+        refs.push({ bucket: CHAT_VIDEO_BUCKET, path: m.video_url });
+      }
     }
     if (refs.length > 0) fetchSignedUrls(refs);
   }, [messages, fetchSignedUrls]);
@@ -704,11 +721,62 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     if (isAtBottomRef.current) scrollToBottom();
   }, [timeline, scrollToBottom]);
 
+  // Read state + "in view" for the server (unread badges, no push while
+  // watching). See lib/chat/use-chat-read-state.ts.
+  const { noteIncoming } = useChatReadState(chatId);
+
+  // "Neue Nachrichten" line above the first partner message newer than
+  // what was read before opening. Settled once the flights are in (a
+  // landed letter sorts by its arrival time), then it stays put.
+  const readBeforeOpening = useRef(initialLastReadAt ? Date.parse(initialLastReadAt) : null).current;
+  const liveFirstUnreadKey = useMemo(() => {
+    if (readBeforeOpening === null) return null;
+    return (
+      timeline.find((item) => isPartnerMessage(item, currentUserId) && item.sortAt > readBeforeOpening)?.key ?? null
+    );
+  }, [currentUserId, readBeforeOpening, timeline]);
+  const [settledFirstUnreadKey, setSettledFirstUnreadKey] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!flightsLoading && settledFirstUnreadKey === undefined) setSettledFirstUnreadKey(liveFirstUnreadKey);
+  }, [flightsLoading, liveFirstUnreadKey, settledFirstUnreadKey]);
+  const firstUnreadKey = settledFirstUnreadKey === undefined ? liveFirstUnreadKey : settledFirstUnreadKey;
+
+  // Partner messages arriving while the chat is open: marked read (if in
+  // view), and counted for the "n neue Nachrichten" button while scrolled
+  // up. Only messages newer than everything shown so far count — older
+  // pages loaded by scrolling up don't.
+  const [unseenBelow, setUnseenBelow] = useState(0);
+  const newestShownAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (flightsLoading) return;
+    const previousNewest = newestShownAtRef.current;
+    let newest = previousNewest ?? -Infinity;
+    let arrived = 0;
+    for (const item of timeline) {
+      if (item.type !== "message") continue;
+      if (item.sortAt > newest) newest = item.sortAt;
+      if (previousNewest !== null && item.sortAt > previousNewest && isPartnerMessage(item, currentUserId)) {
+        arrived += 1;
+      }
+    }
+    newestShownAtRef.current = newest;
+    if (arrived === 0) return;
+    noteIncoming();
+    if (!isAtBottomRef.current) setUnseenBelow((count) => count + arrived);
+  }, [currentUserId, flightsLoading, noteIncoming, timeline]);
+
+  function jumpToNewest() {
+    isAtBottomRef.current = true;
+    scrollToBottom();
+    setUnseenBelow(0);
+  }
+
   function handleScroll() {
     const el = scrollRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     isAtBottomRef.current = distanceFromBottom < BOTTOM_THRESHOLD_PX;
+    if (isAtBottomRef.current && unseenBelow > 0) setUnseenBelow(0);
     if (el.scrollTop < LOAD_OLDER_THRESHOLD_PX && hasOlder) void loadOlder();
   }
 
@@ -717,35 +785,39 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     if (isAtBottomRef.current) scrollToBottom();
   }
 
-  function setImageAttachment(file: File) {
-    if (!file.type.startsWith("image/")) return;
-    setAttachment({ kind: "image", file, previewUrl: createObjectUrl(file) });
+  // Any size and (almost) any format: images and videos are shrunk on
+  // the device right before the upload (see performSend / lib/media).
+  // Type detection falls back to the file extension: HEIC photos, for
+  // one, often arrive without a MIME type.
+  function setFileAttachment(file: File) {
+    setComposerError(null);
+    if (looksLikeVideo(file)) {
+      setAttachment({ kind: "video", file, previewUrl: createObjectUrl(file) });
+    } else if (looksLikeImage(file)) {
+      setAttachment({ kind: "image", file, previewUrl: createObjectUrl(file) });
+    } else {
+      setComposerError("Nur Bilder und Videos können verschickt werden.");
+    }
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (file) setImageAttachment(file);
+    if (file) setFileAttachment(file);
     event.target.value = "";
   }
 
   function handlePaste(event: ClipboardEvent<HTMLElement>) {
-    const item = Array.from(event.clipboardData.items).find((i) =>
-      i.type.startsWith("image/")
-    );
-    if (!item) return;
-    const file = item.getAsFile();
+    const file = Array.from(event.clipboardData.files).find((f) => looksLikeImage(f) || looksLikeVideo(f));
     if (!file) return;
     event.preventDefault();
-    setImageAttachment(file);
+    setFileAttachment(file);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragOver(false);
-    const file = Array.from(event.dataTransfer.files).find((f) =>
-      f.type.startsWith("image/")
-    );
-    if (file) setImageAttachment(file);
+    const file = event.dataTransfer.files[0];
+    if (file) setFileAttachment(file);
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -765,7 +837,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   }
 
   function handleVoiceRecorded(result: RecordedVoice) {
-    setMicError(null);
+    setComposerError(null);
     setAttachment({
       kind: "voice",
       blob: result.blob,
@@ -796,11 +868,13 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     const supabase = createClient();
     let imagePath: string | null = null;
     let audioPath: string | null = null;
+    let videoPath: string | null = null;
     let audioDuration: number | null = null;
 
     updateMessage(id, {
       uploadError: undefined,
       uploadProgress: attachmentToSend ? 0 : undefined,
+      uploadPhase: attachmentToSend && attachmentToSend.kind !== "voice" ? "processing" : "uploading",
     });
 
     if (attachmentToSend) {
@@ -814,20 +888,28 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           return false;
         }
 
-        if (attachmentToSend.kind === "image") {
-          const compressed = await compressChatImage(attachmentToSend.file);
-          const path = buildChatImagePath(chatId, id, compressed);
+        if (attachmentToSend.kind === "image" || attachmentToSend.kind === "video") {
+          const isVideo = attachmentToSend.kind === "video";
+          const processed = isVideo
+            ? await processVideo(attachmentToSend.file, (fraction) => updateUploadProgress(id, fraction))
+            : await compressChatImage(attachmentToSend.file);
+          updateMessage(id, { uploadPhase: "uploading", uploadProgress: 0 });
+          const path = buildChatAttachmentPath(chatId, id, processed.extension);
+          // Processing a long video can take minutes; getSession() hands
+          // out a refreshed token if the first one expired meanwhile.
+          const { data: freshSession } = await supabase.auth.getSession();
           await uploadToBucket({
             supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
             apiKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            accessToken,
-            bucket: CHAT_IMAGE_BUCKET,
+            accessToken: freshSession.session?.access_token ?? accessToken,
+            bucket: isVideo ? CHAT_VIDEO_BUCKET : CHAT_IMAGE_BUCKET,
             path,
-            file: compressed,
-            contentType: compressed.type || "image/jpeg",
+            file: processed.blob,
+            contentType: processed.contentType,
             onProgress: (fraction) => updateUploadProgress(id, fraction),
           });
-          imagePath = path;
+          if (isVideo) videoPath = path;
+          else imagePath = path;
         } else {
           const path = buildChatVoicePath(chatId, id, attachmentToSend.mimeType);
           const contentType = baseMimeType(attachmentToSend.mimeType);
@@ -854,7 +936,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             ? "Keine Internetverbindung. Upload fehlgeschlagen."
             : error instanceof ChatUploadError
               ? error.message
-              : "Upload fehlgeschlagen. Bitte erneut versuchen.";
+              : error instanceof VideoTooLargeError
+                ? "Video ist zu lang und ließ sich nicht klein genug rechnen."
+                : "Upload fehlgeschlagen. Bitte erneut versuchen.";
         updateMessage(id, { uploadError: message, uploadProgress: undefined });
         return false;
       }
@@ -871,6 +955,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       image_url: imagePath,
       audio_url: audioPath,
       audio_duration_seconds: audioDuration,
+      video_url: videoPath,
     });
 
     // 23505 = this id already exists: an earlier attempt did reach the
@@ -893,6 +978,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       image_url: imagePath,
       audio_url: audioPath,
       audio_duration_seconds: audioDuration,
+      video_url: videoPath,
       uploadProgress: undefined,
       uploadError: undefined,
       pendingAttachment: undefined,
@@ -925,6 +1011,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       image_url: null,
       audio_url: null,
       audio_duration_seconds: null,
+      video_url: null,
       created_at: new Date().toISOString(),
       pending: true,
       ...(attachmentToSend
@@ -933,6 +1020,8 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             pendingAttachment: attachmentToSend,
             ...(attachmentToSend.kind === "image"
               ? { localImagePreview: attachmentToSend.previewUrl }
+              : attachmentToSend.kind === "video"
+              ? { localVideoPreview: attachmentToSend.previewUrl }
               : {
                   localAudioPreview: attachmentToSend.previewUrl,
                   audio_duration_seconds: attachmentToSend.durationSeconds,
@@ -1014,6 +1103,9 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       (message.image_url && signedUrls[message.image_url]) || message.localImagePreview;
     const audioSrc =
       (message.audio_url && signedUrls[message.audio_url]) || message.localAudioPreview;
+    const videoSrc =
+      (message.video_url && signedUrls[message.video_url]) || message.localVideoPreview;
+    const videoLoadError = message.video_url ? attachmentLoadErrors[message.video_url] : undefined;
     const isUploading = message.uploadProgress !== undefined;
     const hasError = !!message.uploadError;
     const imageLoadError = message.image_url ? attachmentLoadErrors[message.image_url] : undefined;
@@ -1025,13 +1117,12 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     const bubbleClass = isLetter
       ? "border border-[#d8c9a3] bg-[#f7f0df] text-[#3d3024] shadow-sm dark:border-night-border dark:bg-[#2a231b] dark:text-night-text"
       : isOwn
-        ? `text-white ${ownBubbleStyle ? "" : "bg-neutral-900 dark:bg-night-bubble"}`
+        ? "bg-bubble text-white"
         : "bg-neutral-100 text-neutral-900 dark:bg-night-raised dark:text-night-text";
 
     const isEncrypting = message.id === encryptingId && !hasError;
     const bubble = (
         <div
-          style={!isLetter && isOwn ? ownBubbleStyle : undefined}
           className={`max-w-[80%] space-y-1 break-words rounded-2xl px-3 py-2 text-sm sm:max-w-[75%] ${bubbleClass} ${
             message.pending && !hasError ? "opacity-60" : ""
           }`}
@@ -1058,6 +1149,36 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
                 <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                   <div className="h-1.5 w-2/3 overflow-hidden rounded-full bg-white/30">
                     <div
+                      className={`h-full bg-white transition-all ${
+                        message.uploadPhase === "processing" ? "animate-pulse" : ""
+                      }`}
+                      style={{ width: `${message.uploadPhase === "processing" ? 100 : message.uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {videoSrc && (
+            <div className="relative w-60 max-w-full overflow-hidden rounded-xl bg-black">
+              <video
+                src={videoSrc}
+                controls={!isUploading || hasError}
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={handleMediaLoaded}
+                onError={() => {
+                  if (message.video_url && signedUrls[message.video_url]) {
+                    refreshSignedUrl({ bucket: CHAT_VIDEO_BUCKET, path: message.video_url });
+                  }
+                }}
+                className="max-h-72 w-full"
+              />
+              {isUploading && !hasError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 text-xs text-white">
+                  <span>{message.uploadPhase === "processing" ? "Video wird verkleinert…" : "Wird hochgeladen…"}</span>
+                  <div className="h-1.5 w-2/3 overflow-hidden rounded-full bg-white/30">
+                    <div
                       className="h-full bg-white transition-all"
                       style={{ width: `${message.uploadProgress}%` }}
                     />
@@ -1065,6 +1186,22 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
                 </div>
               )}
             </div>
+          )}
+          {!videoSrc && message.video_url && (
+            videoLoadError ? (
+              <div className="flex w-60 max-w-full flex-col items-center gap-2 rounded-xl border border-dashed border-neutral-300 p-4 text-center dark:border-night-border">
+                <span className="text-xs opacity-70">{videoLoadError}</span>
+                <button
+                  type="button"
+                  onClick={() => fetchSignedUrls([{ bucket: CHAT_VIDEO_BUCKET, path: message.video_url! }])}
+                  className="text-xs font-medium underline"
+                >
+                  Erneut versuchen
+                </button>
+              </div>
+            ) : (
+              <Skeleton className="h-40 w-60 max-w-full rounded-xl" />
+            )
           )}
           {!imageSrc && message.image_url && (
             imageLoadError ? (
@@ -1229,10 +1366,12 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
               key={item.key}
               className={enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : undefined}
             >
+              {item.key === firstUnreadKey && <UnreadDivider />}
               {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
             </div>
           ))}
         </div>
+        <NewMessagesButton count={unseenBelow} onClick={jumpToNewest} />
       </div>
       <div
         className={`border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-colors ${
@@ -1259,12 +1398,12 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             </button>
           </div>
         )}
-        {micError && (
+        {composerError && (
           <div className="mb-2 flex items-start justify-between gap-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-            <span>{micError}</span>
+            <span>{composerError}</span>
             <button
               type="button"
-              onClick={() => setMicError(null)}
+              onClick={() => setComposerError(null)}
               aria-label="Hinweis schließen"
               className="flex-shrink-0 text-red-400 hover:text-red-600"
             >
@@ -1276,7 +1415,20 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
         )}
         {attachment && (
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-night-border dark:bg-night-surface">
-            {attachment.kind === "image" ? (
+            {attachment.kind === "video" ? (
+              <>
+                <video
+                  src={attachment.previewUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="h-12 w-12 rounded-lg bg-black object-cover"
+                />
+                <span className="flex-1 truncate text-xs text-neutral-500 dark:text-night-muted">
+                  🎬 {attachment.file.name}
+                </span>
+              </>
+            ) : attachment.kind === "image" ? (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -1320,14 +1472,14 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*,.heic,.heif"
             onChange={handleFileInputChange}
             className="hidden"
           />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Bild anhängen"
+            aria-label="Bild oder Video anhängen"
             className="flex-shrink-0 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg
@@ -1384,13 +1536,8 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           {hasSendableContent ? (
             <button
               type="submit"
-              style={!isLetterMode ? ownBubbleStyle : undefined}
-              className={`flex-shrink-0 rounded-full px-4 py-2 text-sm text-white disabled:opacity-50 ${
-                isLetterMode
-                  ? "bg-[#c1643a]"
-                  : ownBubbleStyle
-                    ? ""
-                    : "bg-neutral-900 dark:bg-night-accent dark:text-night-bg"
+              className={`flex-shrink-0 rounded-full px-4 py-2 text-sm disabled:opacity-50 ${
+                isLetterMode ? "bg-[#c1643a] text-white" : "bg-accent text-on-accent"
               }`}
             >
               {isLetterMode ? "Losfliegen" : "Senden"}
@@ -1398,7 +1545,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           ) : (
             <VoiceRecorderButton
               onRecorded={handleVoiceRecorded}
-              onError={setMicError}
+              onError={setComposerError}
             />
           )}
         </form>

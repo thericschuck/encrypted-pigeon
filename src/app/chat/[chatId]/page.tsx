@@ -23,7 +23,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
   // is actually part of, so an empty result also covers "not your chat".
   const { data: participants } = await supabase
     .from("chat_participants")
-    .select("user_id")
+    .select("user_id, last_read_at")
     .eq("chat_id", params.chatId);
 
   const isParticipant = participants?.some((p) => p.user_id === user.id);
@@ -32,6 +32,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
   }
 
   const otherUserId = participants.find((p) => p.user_id !== user.id)?.user_id;
+  const myLastReadAt = participants.find((p) => p.user_id === user.id)?.last_read_at ?? null;
 
   // RLS on messages already hides pigeon letters still in flight to me —
   // they show up as "incoming pigeon" placeholders (from the flight rows)
@@ -66,7 +67,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
     // behind the collapsing URL bar, which pushed the composer off-screen.
     <main className="flex h-[100dvh] flex-col">
       <SessionWatcher />
-      <ThemeSync theme={me.theme} />
+      <ThemeSync theme={me.theme} accent={me.accent_color} />
       <header className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-night-border">
         <div className="flex min-w-0 items-center gap-2.5">
           {/* From md up the chat list is always visible as a sidebar. */}
@@ -111,6 +112,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
           partner={partner}
           initialMessages={messages}
           initialHasOlder={hasOlderMessages}
+          initialLastReadAt={myLastReadAt}
         />
       </div>
     </main>

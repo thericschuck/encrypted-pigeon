@@ -54,7 +54,7 @@ export default async function DashboardPage() {
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <SessionWatcher />
-      {me && <ThemeSync theme={me.theme} />}
+      {me && <ThemeSync theme={me.theme} accent={me.accent_color} />}
 
       <header className="flex items-center gap-3 px-3">
         <Avatar profile={me} size="md" />

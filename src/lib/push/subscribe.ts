@@ -16,6 +16,16 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return output;
 }
 
+/** False when the subscription was made with a different (older) VAPID key. */
+function usesServerKey(subscription: PushSubscription, publicKey: string): boolean {
+  const current = subscription.options.applicationServerKey;
+  // Not exposed by every browser — then there's nothing to compare.
+  if (!current) return true;
+  const expected = urlBase64ToUint8Array(publicKey);
+  const actual = new Uint8Array(current);
+  return actual.length === expected.length && actual.every((byte, i) => byte === expected[i]);
+}
+
 export function isPushSupported(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -85,6 +95,14 @@ export async function subscribeToPush(supabase: PigeonClient, userId: string): P
   let subscription: PushSubscription | null;
   try {
     subscription = await registration.pushManager.getSubscription();
+    if (subscription && !usesServerKey(subscription, publicKey)) {
+      // The VAPID key was changed since: pushes to this subscription are
+      // rejected by the push service. Replace it with one for the new key.
+      const staleEndpoint = subscription.endpoint;
+      await subscription.unsubscribe();
+      await supabase.from("push_subscriptions").delete().eq("endpoint", staleEndpoint);
+      subscription = null;
+    }
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,

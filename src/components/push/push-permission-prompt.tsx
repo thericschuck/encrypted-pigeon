@@ -105,7 +105,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
               type="button"
               onClick={handleEnable}
               disabled={requesting}
-              className="mt-2 rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-night-accent dark:text-night-bg"
+              className="mt-2 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent disabled:opacity-50"
             >
               {requesting ? "Einen Moment…" : "Aktivieren"}
             </button>

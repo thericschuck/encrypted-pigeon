@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 import { previewOf, type ChatListItem } from "@/lib/chat/chat-overview";
 import {
   noteChatActivity,
+  onChatRead,
   rememberChatList,
   sortByActivity,
   withLatestActivity,
 } from "@/lib/chat/chat-list-store";
+import { isChatInView } from "@/lib/chat/use-chat-read-state";
 import type { MemberProfile } from "@/lib/profile";
 import { ChatList } from "@/components/dashboard/chat-list";
 
@@ -23,6 +25,17 @@ const STALE_AFTER_HIDDEN_MS = 5 * 60 * 1000;
 // Coalesces bursts (a new chat's message + its flight row) into one
 // server re-render.
 const REFRESH_DEBOUNCE_MS = 600;
+const APP_TITLE = "Encrypted Pigeon";
+
+/** "(3) Encrypted Pigeon" in the tab, and the number on the installed app's icon. */
+function showUnreadTotal(total: number) {
+  document.title = total > 0 ? `(${total}) ${APP_TITLE}` : APP_TITLE;
+  if (!("setAppBadge" in navigator)) return;
+  const badge = total > 0 ? navigator.setAppBadge(total) : navigator.clearAppBadge();
+  badge.catch(() => {
+    // Not allowed here (e.g. not installed) — the list shows the counts anyway.
+  });
+}
 
 interface LiveChatListProps {
   userId: string;
@@ -55,6 +68,10 @@ interface LiveChatListProps {
  */
 export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale }: LiveChatListProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const openChatId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
+  const openChatIdRef = useRef(openChatId);
+  openChatIdRef.current = openChatId;
   const onStaleRef = useRef(onStale);
   onStaleRef.current = onStale;
   const [items, setItems] = useState(() => withLatestActivity(chats));
@@ -77,6 +94,29 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale
   membersRef.current = membersWithoutChat;
   useEffect(() => () => rememberChatList(itemsRef.current, membersRef.current), []);
 
+  // <ChatRoom /> marked a chat read (opened, or new messages seen live).
+  useEffect(
+    () =>
+      onChatRead((chatId) =>
+        setItems((prev) =>
+          prev.some((chat) => chat.chatId === chatId && chat.unreadCount > 0)
+            ? prev.map((chat) => (chat.chatId === chatId ? { ...chat, unreadCount: 0 } : chat))
+            : prev
+        )
+      ),
+    []
+  );
+
+  // The chat that's open next to the list doesn't count — it's being read.
+  const unreadTotal = items.reduce(
+    (sum, chat) => (chat.chatId === openChatId ? sum : sum + chat.unreadCount),
+    0
+  );
+  // Also after every navigation: Next resets the tab title from the page metadata.
+  useEffect(() => {
+    showUnreadTotal(unreadTotal);
+  }, [unreadTotal, pathname]);
+
   useEffect(() => {
     if (media && !window.matchMedia(media).matches) return;
     const supabase = createClient();
@@ -93,12 +133,21 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale
 
     const isKnownChat = (chatId: string | null) =>
       !!chatId && itemsRef.current.some((chat) => chat.chatId === chatId);
+    // Each message counts as unread at most once, however often it arrives
+    // (realtime insert, a landed letter fetched again after a later update).
+    const countedIds = new Set<string>();
 
-    function applyMessage(message: Pick<MessageRow, "chat_id" | "sender_id" | "kind" | "content" | "image_url" | "audio_url" | "created_at">) {
+    function applyMessage(
+      message: Pick<MessageRow, "id" | "chat_id" | "sender_id" | "kind" | "content" | "image_url" | "audio_url" | "video_url" | "created_at">
+    ) {
       if (!isKnownChat(message.chat_id)) {
         scheduleRefresh();
         return;
       }
+      // Unread unless it's mine, or its chat is open and on screen right now.
+      const seenLive = message.chat_id === openChatIdRef.current && isChatInView();
+      const countsAsUnread = message.sender_id !== userId && !seenLive && !countedIds.has(message.id);
+      if (countsAsUnread) countedIds.add(message.id);
       const lastMessage = {
         preview: previewOf(message),
         kind: message.kind,
@@ -108,12 +157,17 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale
       noteChatActivity(message.chat_id, lastMessage);
       setItems((prev) =>
         sortByActivity(
-          prev.map((chat) =>
-            chat.chatId === message.chat_id &&
-            (!chat.lastMessage || Date.parse(lastMessage.createdAt) > Date.parse(chat.lastMessage.createdAt))
-              ? { ...chat, lastMessage }
-              : chat
-          )
+          prev.map((chat) => {
+            if (chat.chatId !== message.chat_id) return chat;
+            const isNewest =
+              !chat.lastMessage || Date.parse(lastMessage.createdAt) > Date.parse(chat.lastMessage.createdAt);
+            if (!isNewest && !countsAsUnread) return chat;
+            return {
+              ...chat,
+              lastMessage: isNewest ? lastMessage : chat.lastMessage,
+              unreadCount: countsAsUnread ? chat.unreadCount + 1 : chat.unreadCount,
+            };
+          })
         )
       );
     }
@@ -143,7 +197,7 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale
       // (invisibly to me) at send time — fetch it for the preview.
       const { data } = await supabase
         .from("messages")
-        .select("chat_id, sender_id, kind, content, image_url, audio_url, created_at")
+        .select("id, chat_id, sender_id, kind, content, image_url, audio_url, video_url, created_at")
         .eq("id", flight.message_id)
         .maybeSingle();
       if (data && !cancelled) applyMessage(data);

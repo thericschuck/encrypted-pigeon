@@ -16,6 +16,8 @@ export interface ChatListItem {
   } | null;
   /** message_ids of pigeon letters to me still in the air in this chat. */
   incomingLetterIds: string[];
+  /** Messages from the partner I haven't seen yet (landed letters included). */
+  unreadCount: number;
 }
 
 export interface ChatOverview {
@@ -25,15 +27,21 @@ export interface ChatOverview {
   membersWithoutChat: MemberProfile[];
 }
 
-export function previewOf(m: { content: string | null; image_url: string | null; audio_url: string | null }) {
+export function previewOf(m: {
+  content: string | null;
+  image_url: string | null;
+  audio_url: string | null;
+  video_url?: string | null;
+}) {
   if (m.content) return m.content;
   if (m.image_url) return "📷 Bild";
+  if (m.video_url) return "🎬 Video";
   if (m.audio_url) return "🎤 Sprachnachricht";
   return "";
 }
 
 /**
- * Everything the dashboard and the chat sidebar show, in five queries
+ * Everything the dashboard and the chat sidebar show, in six queries
  * regardless of chat count. Relies on RLS for scoping: members see all
  * member profiles, only their own chats, and — importantly — no content of
  * pigeon letters still in flight to them (those simply aren't returned).
@@ -56,7 +64,7 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
     };
   }
 
-  const [{ data: otherRows }, { data: latestMessages }, { data: openFlights }] = await Promise.all([
+  const [{ data: otherRows }, { data: latestMessages }, { data: openFlights }, { data: unreadRows }] = await Promise.all([
     supabase.from("chat_participants").select("chat_id, user_id").in("chat_id", chatIds).neq("user_id", userId),
     // Exactly one row per chat (RLS-aware SQL function, see
     // supabase/migrations/20260924030000_latest_message_per_chat.sql).
@@ -67,9 +75,12 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
       .in("chat_id", chatIds)
       .neq("status", "delivered")
       .neq("sender_id", userId),
+    // supabase/migrations/20260926000000_unread_and_chat_presence.sql
+    supabase.rpc("unread_counts_for_chats", { p_chat_ids: chatIds }),
   ]);
 
   const lastByChat = new Map((latestMessages ?? []).map((m) => [m.chat_id, m]));
+  const unreadByChat = new Map((unreadRows ?? []).map((row) => [row.chat_id, row.unread]));
   const incomingByChat = new Map<string, string[]>();
   for (const f of openFlights ?? []) {
     if (!f.chat_id) continue;
@@ -95,6 +106,7 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
           }
         : null,
       incomingLetterIds: incomingByChat.get(row.chat_id) ?? [],
+      unreadCount: unreadByChat.get(row.chat_id) ?? 0,
     });
   }
 

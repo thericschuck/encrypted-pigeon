@@ -5,6 +5,7 @@ import "./globals.css";
 import { PwaInstallPrompt } from "@/components/pwa/pwa-install-prompt";
 import { AuthHashForwarder } from "@/components/auth/auth-hash-forwarder";
 import { THEME_COOKIE, parseTheme, themeClass } from "@/lib/theme";
+import { ACCENT_COOKIE, accentStyle, parseAccent } from "@/lib/accent";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -80,11 +81,18 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const theme = parseTheme(cookieStore.get(THEME_COOKIE)?.value);
+  const accent = parseAccent(cookieStore.get(ACCENT_COOKIE)?.value);
 
   return (
-    // suppressHydrationWarning: <ThemeSync /> may adjust this class client-side.
-    <html lang="de" className={themeClass(theme) || undefined} suppressHydrationWarning>
+    // suppressHydrationWarning: <ThemeSync /> may adjust class/style client-side.
+    <html
+      lang="de"
+      className={themeClass(theme) || undefined}
+      style={accentStyle(accent)}
+      suppressHydrationWarning
+    >
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

@@ -76,6 +76,9 @@ export interface Database {
           chat_id: string;
           user_id: string;
           created_at: string;
+          // Written only via mark_chat_read() (20260926000000_unread_and_chat_presence.sql).
+          last_read_at: string;
+          viewing_until: string | null;
         };
         Insert: {
           chat_id: string;
@@ -98,6 +101,7 @@ export interface Database {
           image_url: string | null;
           audio_url: string | null;
           audio_duration_seconds: number | null;
+          video_url: string | null;
           kind: MessageKind;
           created_at: string;
         };
@@ -109,6 +113,7 @@ export interface Database {
           image_url?: string | null;
           audio_url?: string | null;
           audio_duration_seconds?: number | null;
+          video_url?: string | null;
           kind?: MessageKind;
           created_at?: string;
         };
@@ -120,6 +125,7 @@ export interface Database {
           image_url?: string | null;
           audio_url?: string | null;
           audio_duration_seconds?: number | null;
+          video_url?: string | null;
           kind?: MessageKind;
           created_at?: string;
         };
@@ -228,8 +234,19 @@ export interface Database {
           content: string | null;
           image_url: string | null;
           audio_url: string | null;
+          video_url: string | null;
           created_at: string;
         }[];
+      };
+      // supabase/migrations/20260926000000_unread_and_chat_presence.sql
+      unread_counts_for_chats: {
+        Args: { p_chat_ids: string[] };
+        Returns: { chat_id: string; unread: number }[];
+      };
+      mark_chat_read: {
+        Args: { p_chat_id: string; p_viewing?: boolean };
+        /** My unread total afterwards (app icon badge). */
+        Returns: number;
       };
     };
   };

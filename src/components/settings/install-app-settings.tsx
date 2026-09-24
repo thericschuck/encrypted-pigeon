@@ -38,7 +38,7 @@ export function InstallAppSettings() {
             type="button"
             onClick={handleInstall}
             disabled={busy}
-            className="rounded-full bg-[#c1643a] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            className="rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent disabled:opacity-50"
           >
             {busy ? "Einen Moment…" : "🕊️ App installieren"}
           </button>

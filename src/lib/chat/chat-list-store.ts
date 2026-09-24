@@ -24,6 +24,25 @@ export function noteChatActivity(chatId: string, message: LastMessage) {
   if (isNewer(message, latestByChat.get(chatId))) latestByChat.set(chatId, message);
 }
 
+/**
+ * When this tab last saw each chat (i.e. <ChatRoom /> marked it read). A
+ * list snapshot from before that — the router cache, a remembered list —
+ * must not bring the unread badge back.
+ */
+const readAtByChat = new Map<string, number>();
+const readListeners = new Set<(chatId: string) => void>();
+
+export function noteChatRead(chatId: string) {
+  readAtByChat.set(chatId, Date.now());
+  readListeners.forEach((listener) => listener(chatId));
+}
+
+/** Called whenever a chat gets marked read in this tab. Returns the unsubscribe. */
+export function onChatRead(listener: (chatId: string) => void): () => void {
+  readListeners.add(listener);
+  return () => readListeners.delete(listener);
+}
+
 // The most recent full list any <LiveChatList /> showed, so the chat
 // sidebar can start from it when coming from the dashboard.
 let rememberedList: {
@@ -50,7 +69,13 @@ export function withLatestActivity(chats: ChatListItem[]): ChatListItem[] {
   return sortByActivity(
     chats.map((chat) => {
       const seen = latestByChat.get(chat.chatId);
-      return seen && isNewer(seen, chat.lastMessage) ? { ...chat, lastMessage: seen } : chat;
+      const next = seen && isNewer(seen, chat.lastMessage) ? { ...chat, lastMessage: seen } : chat;
+      const readAt = readAtByChat.get(chat.chatId);
+      // Read in this tab after the newest message the list knows of: seen.
+      if (next.unreadCount > 0 && readAt && next.lastMessage && Date.parse(next.lastMessage.createdAt) <= readAt) {
+        return { ...next, unreadCount: 0 };
+      }
+      return next;
     })
   );
 }

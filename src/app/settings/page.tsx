@@ -33,7 +33,10 @@ export default async function SettingsPage() {
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-md flex-col gap-4 px-4 pb-8 pt-[max(2rem,env(safe-area-inset-top))]">
       <SessionWatcher />
-      <ThemeSync theme={(profile as MemberProfile).theme} />
+      <ThemeSync
+        theme={(profile as MemberProfile).theme}
+        accent={(profile as MemberProfile).accent_color}
+      />
       <div className="flex items-center gap-3">
         <Link
           href="/"

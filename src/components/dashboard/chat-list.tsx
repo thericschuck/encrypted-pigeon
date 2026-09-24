@@ -64,6 +64,8 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                 const href = `/chat/${chat.chatId}`;
                 const active = pathname === href;
                 const last = chat.lastMessage;
+                // The open chat is being read, whatever the count says.
+                const unread = active ? 0 : chat.unreadCount;
                 return (
                   <motion.li
                     key={chat.chatId}
@@ -73,6 +75,11 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                     <Link
                       href={href}
                       aria-current={active ? "page" : undefined}
+                      aria-label={
+                        unread > 0
+                          ? `${displayNameOf(chat.partner)}, ${unread === 1 ? "1 ungelesene Nachricht" : `${unread} ungelesene Nachrichten`}`
+                          : undefined
+                      }
                       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${
                         active
                           ? "bg-neutral-100 dark:bg-night-raised"
@@ -82,28 +89,53 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                       <Avatar profile={chat.partner} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="truncate text-sm font-medium">{displayNameOf(chat.partner)}</span>
+                          <span className={`truncate text-sm ${unread > 0 ? "font-semibold" : "font-medium"}`}>
+                            {displayNameOf(chat.partner)}
+                          </span>
                           {last && (
-                            <span className="flex-shrink-0 text-[11px] text-neutral-400 dark:text-night-muted">
+                            <span
+                              className={`flex-shrink-0 text-[11px] ${
+                                unread > 0
+                                  ? "font-semibold text-[#b0532b] dark:text-night-accent"
+                                  : "text-neutral-400 dark:text-night-muted"
+                              }`}
+                            >
                               {formatListTime(last.createdAt)}
                             </span>
                           )}
                         </div>
-                        <p className="truncate text-xs text-neutral-500 dark:text-night-muted">
-                          {chat.incomingLetterIds.length > 0 ? (
-                            <span className="font-medium text-[#b0532b] dark:text-night-accent">
-                              🕊️ Eine Taube ist zu dir unterwegs…
+                        <div className="flex items-center gap-2">
+                          <p
+                            className={`min-w-0 flex-1 truncate text-xs ${
+                              unread > 0
+                                ? "text-neutral-800 dark:text-night-text"
+                                : "text-neutral-500 dark:text-night-muted"
+                            }`}
+                          >
+                            {chat.incomingLetterIds.length > 0 ? (
+                              <span className="font-medium text-[#b0532b] dark:text-night-accent">
+                                🕊️ Eine Taube ist zu dir unterwegs…
+                              </span>
+                            ) : last ? (
+                              <>
+                                {last.fromMe && "Du: "}
+                                {last.kind === "pigeon" && "✉️ "}
+                                {last.preview}
+                              </>
+                            ) : (
+                              "Noch keine Nachrichten"
+                            )}
+                          </p>
+                          {unread > 0 && (
+                            <span
+                              key={unread}
+                              aria-hidden="true"
+                              className="animate-fade-in flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#c1643a] px-1.5 text-[11px] font-semibold leading-none text-white dark:bg-night-accent dark:text-night-bg"
+                            >
+                              {unread > 99 ? "99+" : unread}
                             </span>
-                          ) : last ? (
-                            <>
-                              {last.fromMe && "Du: "}
-                              {last.kind === "pigeon" && "✉️ "}
-                              {last.preview}
-                            </>
-                          ) : (
-                            "Noch keine Nachrichten"
                           )}
-                        </p>
+                        </div>
                       </div>
                     </Link>
                   </motion.li>
