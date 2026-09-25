@@ -12,6 +12,7 @@ export type MessageKind = "chat" | "pigeon";
 export type ThemePreference = "system" | "light" | "dark";
 export type ScheduleCategory = "training" | "freizeit" | "schlafen" | "essen" | "unterwegs" | "sonstiges";
 export type ScheduleAvailability = "available" | "limited" | "unavailable";
+export type AiRole = "user" | "assistant";
 
 export interface Database {
   pigeon: {
@@ -318,6 +319,61 @@ export interface Database {
           owner_id?: string;
           day?: string;
           note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      // supabase/migrations/20260930000000_ai_assistant.sql
+      ai_conversations: {
+        Row: {
+          id: string;
+          owner_id: string;
+          title: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          title: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      ai_messages: {
+        Row: {
+          id: string;
+          conversation_id: string;
+          role: AiRole;
+          content: string;
+          reasoning: string | null;
+          model: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          conversation_id: string;
+          role: AiRole;
+          content: string;
+          reasoning?: string | null;
+          model?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          conversation_id?: string;
+          role?: AiRole;
+          content?: string;
+          reasoning?: string | null;
+          model?: string | null;
           created_at?: string;
         };
         Relationships: [];

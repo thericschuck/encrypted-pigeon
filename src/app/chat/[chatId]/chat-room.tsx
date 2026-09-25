@@ -503,7 +503,6 @@ export function ChatRoom({
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | undefined;
     let cancelled = false;
-    let hasSubscribedOnce = false;
     let hiddenSince: number | null = null;
     let resyncTimer: ReturnType<typeof setTimeout> | undefined;
     let resyncRunning = false;
@@ -570,12 +569,13 @@ export function ChatRoom({
           }
         )
         .subscribe((status) => {
-          // Every SUBSCRIBED after the first one is a reconnect — anything
-          // sent in between never reached us as an event.
-          if (status === "SUBSCRIBED") {
-            if (hasSubscribedOnce) scheduleResync();
-            hasSubscribedOnce = true;
-          }
+          // Every SUBSCRIBED catches up once: after a reconnect, anything
+          // sent in between never reached us as an event — and the first
+          // one too, since initialMessages can be older than the channel.
+          // Coming back to a chat, Next.js may render it from its router
+          // cache (always for the back button), i.e. without whatever
+          // arrived or finished sending while I was away.
+          if (status === "SUBSCRIBED") scheduleResync();
         });
     });
 

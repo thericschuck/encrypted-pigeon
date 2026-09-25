@@ -6,7 +6,9 @@
 // request itself kept running, invisibly). Now the send runs here, the
 // chat just renders what's in the outbox, and coming back shows the
 // bubble right where it is. Closing/reloading the tab mid-send asks
-// first (beforeunload).
+// first (beforeunload) — and if the page does get reloaded anyway (mobile
+// browsers do that to backgrounded web apps), the copy on disk
+// (outbox-persistence.ts) lets resumeOutbox() start the send over.
 //
 // Object URLs of attachments handed to the outbox are owned by it (and
 // revoked when the entry goes), so they stay valid after the chat that
@@ -23,6 +25,12 @@ import { VideoTooLargeError, processVideo } from "@/lib/media/video";
 import { previewOf } from "@/lib/chat/chat-overview";
 import { noteChatActivity } from "@/lib/chat/chat-list-store";
 import { isSessionExpiredError, redirectToLoginForExpiredSession } from "@/lib/auth/session-expiry";
+import {
+  forgetPersistedMessage,
+  loadPersistedMessages,
+  persistMessage,
+  type PersistedMessage,
+} from "@/lib/chat/outbox-persistence";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
 
@@ -265,6 +273,7 @@ async function performSend(id: string): Promise<boolean> {
         fromMe: true,
       });
     }
+    void forgetPersistedMessage(id);
     setTimeout(() => remove(id), SENT_RETENTION_MS);
     return true;
   } finally {
@@ -283,10 +292,9 @@ export interface NewOutgoingMessage {
   attachment: PendingAttachment | null;
 }
 
-/** Queues a message and sends it. Resolves true once it's on the server. */
-export function sendMessage(input: NewOutgoingMessage): Promise<boolean> {
+function toEntry(input: NewOutgoingMessage, createdAt: string): OutboxMessage {
   const { attachment } = input;
-  const entry: OutboxMessage = {
+  return {
     id: input.id,
     chat_id: input.chatId,
     sender_id: input.senderId,
@@ -297,7 +305,7 @@ export function sendMessage(input: NewOutgoingMessage): Promise<boolean> {
     audio_duration_seconds: null,
     video_url: null,
     reply_to_id: input.replyToId,
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
     pending: true,
     ...(attachment
       ? {
@@ -311,9 +319,92 @@ export function sendMessage(input: NewOutgoingMessage): Promise<boolean> {
         }
       : {}),
   };
-  entries = [...entries, entry];
+}
+
+function toPersisted(input: NewOutgoingMessage, createdAt: string): PersistedMessage {
+  const { attachment } = input;
+  return {
+    id: input.id,
+    chatId: input.chatId,
+    senderId: input.senderId,
+    kind: input.kind,
+    text: input.text,
+    replyToId: input.replyToId,
+    createdAt,
+    attachment: !attachment
+      ? null
+      : attachment.kind === "voice"
+        ? {
+            kind: "voice",
+            blob: attachment.blob,
+            durationSeconds: attachment.durationSeconds,
+            mimeType: attachment.mimeType,
+          }
+        : { kind: attachment.kind, blob: attachment.file, name: attachment.file.name, type: attachment.file.type },
+  };
+}
+
+/** Queues a message and sends it. Resolves true once it's on the server. */
+export function sendMessage(input: NewOutgoingMessage): Promise<boolean> {
+  const createdAt = new Date().toISOString();
+  entries = [...entries, toEntry(input, createdAt)];
   emit();
-  return performSend(entry.id);
+  void persistMessage(toPersisted(input, createdAt));
+  return performSend(input.id);
+}
+
+let resumed = false;
+
+/**
+ * After a reload: picks up the messages this device was still sending
+ * (or had failed to send) and starts them over. Once per page load; only
+ * the signed-in user's own messages (a shared device keeps the others).
+ */
+export async function resumeOutbox(userId: string): Promise<void> {
+  if (resumed) return;
+  resumed = true;
+  const saved = (await loadPersistedMessages()).filter(
+    (m) => m.senderId === userId && !entries.some((e) => e.id === m.id)
+  );
+  if (saved.length === 0) return;
+
+  // Went through right before the reload (only forgetting it didn't make
+  // it)? Then the chat shows the real message; nothing to redo.
+  const { data: onServer } = await createClient()
+    .from("messages")
+    .select("id")
+    .in(
+      "id",
+      saved.map((m) => m.id)
+    );
+  const sent = new Set((onServer ?? []).map((row) => row.id));
+
+  for (const message of saved) {
+    if (sent.has(message.id)) {
+      void forgetPersistedMessage(message.id);
+      continue;
+    }
+    const a = message.attachment;
+    let attachment: PendingAttachment | null = null;
+    if (a?.kind === "voice") {
+      attachment = { ...a, previewUrl: URL.createObjectURL(a.blob) };
+    } else if (a) {
+      const file = new File([a.blob], a.name, { type: a.type });
+      attachment = { kind: a.kind, file, previewUrl: URL.createObjectURL(file) };
+    }
+    const input: NewOutgoingMessage = {
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      kind: message.kind,
+      text: message.text,
+      replyToId: message.replyToId,
+      attachment,
+    };
+    entries = [...entries, toEntry(input, message.createdAt)];
+    emit();
+    void performSend(message.id);
+  }
 }
 
 /** "Erneut versuchen" on a failed message. */
@@ -324,7 +415,9 @@ export function retryMessage(id: string): Promise<boolean> {
 /** "Verwerfen": drop a failed message that won't be retried. */
 export function discardMessage(id: string) {
   const entry = entries.find((m) => m.id === id);
-  if (entry?.uploadError && !running.has(id)) remove(id);
+  if (!entry?.uploadError || running.has(id)) return;
+  remove(id);
+  void forgetPersistedMessage(id);
 }
 
 // ---------------------------------------------------------------------------

@@ -66,6 +66,18 @@ export default async function DashboardPage() {
         </div>
         {isAdmin && (
           <Link
+            href="/ai"
+            aria-label="KI-Assistent"
+            title="KI-Assistent"
+            className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.8 4.5 11 8l3.5 1.2L11 10.4 9.8 14l-1.2-3.6L5 9.2 8.6 8l1.2-3.5ZM17 13l.7 2.1 2.1.7-2.1.7L17 18.6l-.7-2.1-2.1-.7 2.1-.7L17 13Z" />
+            </svg>
+          </Link>
+        )}
+        {isAdmin && (
+          <Link
             href="/translate"
             aria-label="Übersetzer"
             title="Übersetzer"

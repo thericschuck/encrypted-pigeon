@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 const config: Config = {
   // Per-user theme (settings): <html class="light|dark"> forces a scheme,
@@ -42,6 +43,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  // prose classes for the KI-Assistent's markdown answers.
+  plugins: [typography],
 };
 export default config;

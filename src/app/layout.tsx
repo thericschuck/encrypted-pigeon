@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import { PwaInstallPrompt } from "@/components/pwa/pwa-install-prompt";
 import { AuthHashForwarder } from "@/components/auth/auth-hash-forwarder";
+import { OutboxResumer } from "@/components/chat/outbox-resumer";
 import { THEME_COOKIE, parseTheme, themeClass } from "@/lib/theme";
 import { ACCENT_COOKIE, accentStyle, parseAccent } from "@/lib/accent";
 
@@ -97,6 +98,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthHashForwarder />
+        <OutboxResumer />
         {children}
         <PwaInstallPrompt />
       </body>
