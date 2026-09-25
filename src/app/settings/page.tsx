@@ -58,6 +58,23 @@ export default async function SettingsPage() {
       </div>
 
       <ProfileSettings profile={profile as MemberProfile} />
+      <Link
+        href="/schedule"
+        className="flex items-center gap-3 rounded-xl border border-neutral-200 p-4 hover:bg-neutral-50 dark:border-night-border dark:bg-night-surface dark:hover:bg-night-raised"
+      >
+        <span className="text-xl" aria-hidden="true">
+          🗓️
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">Mein Wochenplan</span>
+          <span className="block text-xs text-neutral-500 dark:text-night-muted">
+            Training, Freizeit und wann du erreichbar bist, in deiner Zeitzone.
+          </span>
+        </span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 text-neutral-400">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
       <PushSettings
         userId={user.id}
         initialPrefs={parseNotificationPrefs(profile.notification_prefs)}

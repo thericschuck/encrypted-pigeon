@@ -6,6 +6,8 @@ import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { Avatar } from "@/components/ui/avatar";
 import { CHAT_PAGE_SIZE } from "@/lib/chat/pagination";
+import { loadSchedules } from "@/lib/schedule/schedule";
+import { HeaderScheduleStatus } from "@/components/schedule/schedule-status";
 import { ChatRoom } from "./chat-room";
 
 interface ChatPageProps {
@@ -68,6 +70,9 @@ export default async function ChatPage({ params }: ChatPageProps) {
     redirect("/");
   }
 
+  // RLS returns nothing if the partner's Wochenplan isn't visible to me.
+  const partnerSchedule = partner ? ((await loadSchedules(supabase, [partner]))[partner.id] ?? null) : null;
+
   return (
     // 100dvh, not h-screen: on mobile Safari/Chrome 100vh includes the area
     // behind the collapsing URL bar, which pushed the composer off-screen.
@@ -87,7 +92,10 @@ export default async function ChatPage({ params }: ChatPageProps) {
             </svg>
           </Link>
           <Avatar profile={partner} size="sm" />
-          <h1 className="min-w-0 truncate text-sm font-semibold">{displayNameOf(partner)}</h1>
+          <div className="flex min-w-0 flex-col">
+            <h1 className="min-w-0 truncate text-sm font-semibold">{displayNameOf(partner)}</h1>
+            <HeaderScheduleStatus schedule={partnerSchedule} />
+          </div>
         </div>
         <Link
           href="/settings"
@@ -119,6 +127,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
           initialMessages={messages}
           initialHasOlder={hasOlderMessages}
           initialLastReadAt={myLastReadAt}
+          partnerSchedule={partnerSchedule}
         />
       </div>
     </main>

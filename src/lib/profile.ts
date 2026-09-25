@@ -5,11 +5,11 @@ export type ProfileRow = Database["pigeon"]["Tables"]["profiles"]["Row"];
 /** The profile fields the UI needs to render a person anywhere. */
 export type MemberProfile = Pick<
   ProfileRow,
-  "id" | "email" | "display_name" | "avatar_url" | "pigeon_name" | "accent_color" | "theme"
+  "id" | "email" | "display_name" | "avatar_url" | "pigeon_name" | "accent_color" | "theme" | "timezone" | "schedule_public"
 >;
 
 export const MEMBER_PROFILE_COLUMNS =
-  "id, email, display_name, avatar_url, pigeon_name, accent_color, theme";
+  "id, email, display_name, avatar_url, pigeon_name, accent_color, theme, timezone, schedule_public";
 
 export const AVATAR_BUCKET = "pigeon-avatars";
 

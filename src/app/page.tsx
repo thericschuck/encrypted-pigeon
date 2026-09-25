@@ -64,10 +64,32 @@ export default async function DashboardPage() {
             🕊️ {pigeonNameOf(me)} wartet auf ihren nächsten Brief.
           </p>
         </div>
+        {isAdmin && (
+          <Link
+            href="/translate"
+            aria-label="Übersetzer"
+            title="Übersetzer"
+            className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 3v2m1.05 9.5A18.02 18.02 0 0 1 6.41 9M12.75 5C11.78 10.77 8.07 15.61 3 18.13M12 21l5.25-11.25L22.5 21m-9-3h7.5" />
+            </svg>
+          </Link>
+        )}
+        <Link
+          href="/schedule"
+          aria-label="Mein Wochenplan"
+          className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16 3v4M8 3v4M3 10h18M8 14h2M14 14h2M8 17h2" />
+          </svg>
+        </Link>
         <Link
           href="/settings"
           aria-label="Einstellungen"
-          className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
+          className="-ml-2 flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
             <path

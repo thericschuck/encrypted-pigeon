@@ -8,6 +8,7 @@ import type { ChatListItem } from "@/lib/chat/chat-overview";
 import { displayNameOf, type MemberProfile } from "@/lib/profile";
 import { startChat } from "@/app/actions/chats";
 import { Avatar } from "@/components/ui/avatar";
+import { AvatarScheduleDot } from "@/components/schedule/schedule-status";
 
 function formatListTime(iso: string): string {
   const date = new Date(iso);
@@ -86,7 +87,10 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                           : "hover:bg-neutral-50 dark:hover:bg-night-surface"
                       }`}
                     >
-                      <Avatar profile={chat.partner} />
+                      <span className="relative flex-shrink-0">
+                        <Avatar profile={chat.partner} />
+                        <AvatarScheduleDot schedule={chat.schedule} />
+                      </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
                           <span className={`truncate text-sm ${unread > 0 ? "font-semibold" : "font-medium"}`}>

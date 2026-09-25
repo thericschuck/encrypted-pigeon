@@ -10,6 +10,8 @@
 export type PigeonFlightStatus = "encrypting" | "in_transit" | "delivered";
 export type MessageKind = "chat" | "pigeon";
 export type ThemePreference = "system" | "light" | "dark";
+export type ScheduleCategory = "training" | "freizeit" | "schlafen" | "essen" | "unterwegs" | "sonstiges";
+export type ScheduleAvailability = "available" | "limited" | "unavailable";
 
 export interface Database {
   pigeon: {
@@ -28,6 +30,10 @@ export interface Database {
           notification_prefs: Record<string, boolean>;
           // Set for the ADMIN_EMAIL account by ensureMembership(); widens profiles RLS.
           is_admin: boolean;
+          // IANA zone the member's Wochenplan is written in.
+          timezone: string;
+          // Plan readable by every member (set only via set_schedule_public()).
+          schedule_public: boolean;
           created_at: string;
         };
         Insert: {
@@ -40,6 +46,8 @@ export interface Database {
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
           is_admin?: boolean;
+          timezone?: string;
+          schedule_public?: boolean;
           created_at?: string;
         };
         Update: {
@@ -52,6 +60,8 @@ export interface Database {
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
           is_admin?: boolean;
+          timezone?: string;
+          schedule_public?: boolean;
           created_at?: string;
         };
         Relationships: [];
@@ -103,6 +113,7 @@ export interface Database {
           audio_duration_seconds: number | null;
           video_url: string | null;
           kind: MessageKind;
+          reply_to_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -115,6 +126,7 @@ export interface Database {
           audio_duration_seconds?: number | null;
           video_url?: string | null;
           kind?: MessageKind;
+          reply_to_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -127,6 +139,7 @@ export interface Database {
           audio_duration_seconds?: number | null;
           video_url?: string | null;
           kind?: MessageKind;
+          reply_to_id?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -221,6 +234,67 @@ export interface Database {
         };
         Relationships: [];
       };
+      // supabase/migrations/20260928000000_weekly_schedule.sql
+      schedule_blocks: {
+        Row: {
+          id: string;
+          owner_id: string;
+          weekday: number | null;
+          exception_day: string | null;
+          start_minute: number;
+          end_minute: number;
+          category: ScheduleCategory;
+          availability: ScheduleAvailability;
+          label: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          weekday?: number | null;
+          exception_day?: string | null;
+          start_minute: number;
+          end_minute: number;
+          category: ScheduleCategory;
+          availability: ScheduleAvailability;
+          label?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          weekday?: number | null;
+          exception_day?: string | null;
+          start_minute?: number;
+          end_minute?: number;
+          category?: ScheduleCategory;
+          availability?: ScheduleAvailability;
+          label?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      schedule_exceptions: {
+        Row: {
+          owner_id: string;
+          day: string;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          day: string;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          owner_id?: string;
+          day?: string;
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -247,6 +321,11 @@ export interface Database {
         Args: { p_chat_id: string; p_viewing?: boolean };
         /** My unread total afterwards (app icon badge). */
         Returns: number;
+      };
+      // supabase/migrations/20260928000000_weekly_schedule.sql (admin only)
+      set_schedule_public: {
+        Args: { p_user_id: string; p_public: boolean };
+        Returns: undefined;
       };
     };
   };

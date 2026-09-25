@@ -55,7 +55,15 @@ import { NewMessagesButton, UnreadDivider } from "@/components/chat/unread-marke
 import { useChatReadState } from "@/lib/chat/use-chat-read-state";
 import { PigeonFlightMap } from "@/components/chat/pigeon-flight-map";
 import { PigeonStatusBadge } from "@/components/chat/pigeon-status-badge";
+import {
+  ReplyComposerPreview,
+  ReplyQuote,
+  ReplyableRow,
+  type QuoteInfo,
+} from "@/components/chat/message-reply";
 import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
+import { AvailabilityHint } from "@/components/chat/availability-hint";
+import type { Schedule } from "@/lib/schedule/schedule";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
@@ -97,6 +105,8 @@ interface ChatRoomProps {
   initialHasOlder: boolean;
   /** Up to when I had read this chat before opening it ("Neue Nachrichten" line). */
   initialLastReadAt: string | null;
+  /** The partner's Wochenplan, if it's visible to me (busy hint above the composer). */
+  partnerSchedule: Schedule | null;
 }
 
 interface StorageRef {
@@ -116,6 +126,16 @@ const LOAD_OLDER_THRESHOLD_PX = 400;
 const RESYNC_AFTER_HIDDEN_MS = 60 * 1000;
 // Collapses simultaneous catch-up triggers into one resync.
 const RESYNC_DEBOUNCE_MS = 500;
+// How long a message stays highlighted after jumping to it from a quote.
+const JUMP_HIGHLIGHT_MS = 1600;
+// The composer grows with its text up to this height (px), then scrolls:
+// about six lines in a chat, more room for a letter.
+const COMPOSER_MAX_HEIGHT_PX = { chat: 160, pigeon: 280 } as const;
+
+// Unsent text per chat and device, like WhatsApp drafts.
+function draftStorageKey(userId: string, chatId: string) {
+  return `pigeon-draft:${userId}:${chatId}`;
+}
 
 function sendErrorMessage(): string {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -180,7 +200,15 @@ function isPartnerMessage(item: TimelineItem, currentUserId: string) {
   return item.type === "message" && item.message.sender_id !== currentUserId;
 }
 
-export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder, initialLastReadAt }: ChatRoomProps) {
+export function ChatRoom({
+  chatId,
+  me,
+  partner,
+  initialMessages,
+  initialHasOlder,
+  initialLastReadAt,
+  partnerSchedule,
+}: ChatRoomProps) {
   const currentUserId = me.id;
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [flights, setFlights] = useState<Record<string, FlightRow>>({});
@@ -193,6 +221,20 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [attachmentLoadErrors, setAttachmentLoadErrors] = useState<Record<string, string>>({});
   const [composerError, setComposerError] = useState<string | null>(null);
+  // The message the composer is currently answering ("Antworten").
+  const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
+  // Quoted messages outside the loaded window, fetched by id. null = not
+  // readable for me (deleted, or a letter to me still in the air).
+  const [quotedOutsideWindow, setQuotedOutsideWindow] = useState<Record<string, MessageRow | null>>({});
+  const requestedQuotedIds = useRef<Set<string>>(new Set());
+  // Clicking a quote: scroll to the original (loading older pages until
+  // it's there), then highlight it briefly.
+  const [jumpTargetId, setJumpTargetId] = useState<string | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Desktop (mouse + keyboard): Enter sends, Shift+Enter is a new line.
+  // Touch screens: Enter is a new line, the button sends — like WhatsApp.
+  const sendsOnEnterRef = useRef(false);
   // The own chat message whose hacker show is playing in the chat
   // background. One at a time: a new send restarts the show for the newest
   // message (the earlier ones are already sent either way).
@@ -670,6 +712,87 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     if (refs.length > 0) fetchSignedUrls(refs);
   }, [messages, fetchSignedUrls]);
 
+  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+
+  // Replies quoting something older than the loaded window: fetch just
+  // those originals by id (RLS decides whether I may read them).
+  useEffect(() => {
+    const missing = new Set<string>();
+    for (const m of messages) {
+      const id = m.reply_to_id;
+      if (id && !messagesById.has(id) && !requestedQuotedIds.current.has(id)) missing.add(id);
+    }
+    if (missing.size === 0) return;
+    const ids = Array.from(missing);
+    ids.forEach((id) => requestedQuotedIds.current.add(id));
+
+    const supabase = createClient();
+    supabase
+      .from("messages")
+      .select("*")
+      .in("id", ids)
+      .then(({ data, error }) => {
+        if (error) {
+          ids.forEach((id) => requestedQuotedIds.current.delete(id));
+          return;
+        }
+        const found = new Map((data ?? []).map((row) => [row.id, row]));
+        setQuotedOutsideWindow((prev) => {
+          const next = { ...prev };
+          for (const id of ids) next[id] = found.get(id) ?? null;
+          return next;
+        });
+      });
+  }, [messages, messagesById]);
+
+  function quoteInfoFor(quotedId: string): QuoteInfo {
+    const quoted = messagesById.get(quotedId) ?? quotedOutsideWindow[quotedId];
+    if (!quoted) {
+      const flight = flights[quotedId];
+      if (flight && flight.sender_id !== currentUserId && flight.status !== "delivered") {
+        return { author: partnerName, preview: "🕊️ Brief ist noch unterwegs", unavailable: true };
+      }
+      return quoted === null
+        ? { author: "Nachricht", preview: "Nachricht nicht mehr verfügbar", unavailable: true }
+        : { author: "…", preview: "Wird geladen…", unavailable: true };
+    }
+    const preview = previewOf(quoted);
+    return {
+      author: quoted.sender_id === currentUserId ? "Du" : partnerName,
+      preview: quoted.kind === "pigeon" ? `✉️ ${preview || "Brief"}` : preview,
+    };
+  }
+
+  function startReply(message: DisplayMessage) {
+    setReplyTo(message);
+    setComposerError(null);
+    composerRef.current?.focus();
+  }
+
+  // Scroll to a quoted message. Not loaded yet: load older pages one by
+  // one until it shows up (or there's no older history left).
+  useEffect(() => {
+    if (!jumpTargetId) return;
+    const el = scrollRef.current?.querySelector(`[data-message-id="${jumpTargetId}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      setHighlightedId(jumpTargetId);
+      setJumpTargetId(null);
+      return;
+    }
+    if (!hasOlder) {
+      setJumpTargetId(null);
+      return;
+    }
+    if (!loadingOlder) void loadOlder();
+  }, [hasOlder, jumpTargetId, loadOlder, loadingOlder, messages]);
+
+  useEffect(() => {
+    if (!highlightedId) return;
+    const timer = setTimeout(() => setHighlightedId(null), JUMP_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlightedId]);
+
   // Letters to me appear at their *arrival* time (that's when they were
   // "delivered"), everything else at send time; incoming pigeons sit at
   // their departure time until they land and become the letter.
@@ -863,7 +986,8 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     id: string,
     text: string | null,
     attachmentToSend: PendingAttachment | null,
-    kind: MessageKind
+    kind: MessageKind,
+    replyToId: string | null
   ): Promise<boolean> {
     const supabase = createClient();
     let imagePath: string | null = null;
@@ -958,6 +1082,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       audio_url: audioPath,
       audio_duration_seconds: audioDuration,
       video_url: videoPath,
+      reply_to_id: replyToId,
     });
 
     // 23505 = this id already exists: an earlier attempt did reach the
@@ -993,6 +1118,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     const attachmentToSend = attachment;
     if (!text && !attachmentToSend) return;
     const kind = mode;
+    const replyToId = replyTo?.id ?? null;
 
     // First thing, while still inside the submit gesture (iOS only allows
     // audio started directly from one). Chat: the terminal "boot" chime
@@ -1002,6 +1128,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
 
     setDraft("");
     setAttachment(null);
+    setReplyTo(null);
 
     const id = crypto.randomUUID();
     const optimisticMessage: DisplayMessage = {
@@ -1014,6 +1141,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       audio_url: null,
       audio_duration_seconds: null,
       video_url: null,
+      reply_to_id: replyToId,
       created_at: new Date().toISOString(),
       pending: true,
       ...(attachmentToSend
@@ -1040,7 +1168,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
       // (the recipient has it immediately); the sender sees the bubble at
       // once, with the hacker show playing in the chat background.
       setEncryptingId(id);
-      void performSend(id, text || null, attachmentToSend, "chat");
+      void performSend(id, text || null, attachmentToSend, "chat", replyToId);
       return;
     }
 
@@ -1049,7 +1177,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     // ready" state until the flight row arrives a beat later. Back to
     // chat mode afterwards: letters are the deliberate exception.
     setMode("chat");
-    void performSend(id, text || null, attachmentToSend, "pigeon").then((ok) => {
+    void performSend(id, text || null, attachmentToSend, "pigeon", replyToId).then((ok) => {
       if (ok) setOpenFlightMessageId(id);
     });
   }
@@ -1059,12 +1187,21 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     submitMessage();
   }
 
-  function handleLetterKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    // Enter makes a new line in a letter; Ctrl/Cmd+Enter sends it.
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && replyTo) {
       event.preventDefault();
-      submitMessage();
+      setReplyTo(null);
+      return;
     }
+    // isComposing: Enter that confirms an IME/autocorrect suggestion.
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    // Ctrl/Cmd+Enter always sends. Otherwise Enter makes a new line in a
+    // letter and on touch screens, and sends a chat message on desktop.
+    const sends =
+      event.ctrlKey || event.metaKey || (!isLetterMode && !event.shiftKey && sendsOnEnterRef.current);
+    if (!sends) return;
+    event.preventDefault();
+    submitMessage();
   }
 
   const handleEncryptionComplete = useCallback((id: string) => {
@@ -1081,7 +1218,13 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
   }, [encryptingFailed]);
 
   function retrySend(message: DisplayMessage) {
-    void performSend(message.id, message.content, message.pendingAttachment ?? null, message.kind).then(
+    void performSend(
+      message.id,
+      message.content,
+      message.pendingAttachment ?? null,
+      message.kind,
+      message.reply_to_id
+    ).then(
       (ok) => {
         if (ok && message.kind === "pigeon") setOpenFlightMessageId(message.id);
       }
@@ -1093,6 +1236,49 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
 
   const hasSendableContent = !!draft.trim() || !!attachment;
   const isLetterMode = mode === "pigeon";
+
+  useEffect(() => {
+    sendsOnEnterRef.current = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  }, []);
+
+  // Grow the composer with its content (scrollHeight excludes the 1px
+  // borders, height includes them), scrolling only past the max height.
+  const resizeComposer = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const max = COMPOSER_MAX_HEIGHT_PX[isLetterMode ? "pigeon" : "chat"];
+    el.style.height = "auto";
+    const needed = el.scrollHeight + 2;
+    el.style.height = `${Math.min(needed, max)}px`;
+    el.style.overflowY = needed > max ? "auto" : "hidden";
+  }, [isLetterMode]);
+
+  useLayoutEffect(resizeComposer, [draft, resizeComposer]);
+
+  useEffect(() => {
+    window.addEventListener("resize", resizeComposer);
+    return () => window.removeEventListener("resize", resizeComposer);
+  }, [resizeComposer]);
+
+  // Drafts: restored after mount (localStorage isn't there during SSR),
+  // saved on every change. Storage can be unavailable — then no drafts.
+  const draftRestoredRef = useRef(false);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(draftStorageKey(currentUserId, chatId));
+      if (saved) setDraft((current) => current || saved);
+    } catch {}
+    draftRestoredRef.current = true;
+  }, [chatId, currentUserId]);
+
+  useEffect(() => {
+    if (!draftRestoredRef.current) return;
+    try {
+      const key = draftStorageKey(currentUserId, chatId);
+      if (draft) window.localStorage.setItem(key, draft);
+      else window.localStorage.removeItem(key);
+    } catch {}
+  }, [chatId, currentUserId, draft]);
   const openFlight = openFlightMessageId ? flights[openFlightMessageId] : undefined;
   const openFlightIsMine = openFlight
     ? openFlight.sender_id === currentUserId
@@ -1125,7 +1311,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
     const isEncrypting = message.id === encryptingId && !hasError;
     const bubble = (
         <div
-          className={`max-w-[80%] space-y-1 break-words rounded-2xl px-3 py-2 text-sm sm:max-w-[75%] ${bubbleClass} ${
+          className={`min-w-0 space-y-1 break-words rounded-2xl px-3 py-2 text-sm ${bubbleClass} ${
             message.pending && !hasError ? "opacity-60" : ""
           }`}
         >
@@ -1134,6 +1320,17 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
               ✉️ {isOwn ? `Brief an ${partnerName}` : `Brief von ${partnerName}`}
             </p>
           )}
+          {message.reply_to_id && (() => {
+            const quotedId = message.reply_to_id;
+            const quote = quoteInfoFor(quotedId);
+            return (
+              <ReplyQuote
+                quote={quote}
+                variant={isLetter ? "letter" : isOwn ? "own" : "other"}
+                onClick={quote.unavailable ? undefined : () => setJumpTargetId(quotedId)}
+              />
+            );
+          })()}
           {imageSrc && (
             <div className="relative w-60 max-w-full overflow-hidden rounded-xl">
               <ChatImage
@@ -1301,7 +1498,11 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
         </div>
     );
 
-    return <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>{bubble}</div>;
+    return (
+      <ReplyableRow isOwn={isOwn} enabled={!message.pending && !hasError} onReply={() => startReply(message)}>
+        {bubble}
+      </ReplyableRow>
+    );
   }
 
   function renderIncoming(flight: FlightRow) {
@@ -1343,7 +1544,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="relative h-full space-y-2 overflow-y-auto overscroll-contain px-4 py-4"
+          className="relative h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4"
         >
           {hasOlder && (
             <div className="flex justify-center py-1">
@@ -1366,7 +1567,10 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           {timeline.map((item) => (
             <div
               key={item.key}
-              className={enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : undefined}
+              data-message-id={item.type === "message" ? item.message.id : undefined}
+              className={`-mx-2 rounded-2xl px-2 transition-colors duration-700 ${
+                enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : ""
+              } ${item.key === highlightedId ? "bg-[#c1643a]/15 dark:bg-night-accent/20" : ""}`}
             >
               {item.key === firstUnreadKey && <UnreadDivider />}
               {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
@@ -1414,6 +1618,14 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
               </svg>
             </button>
           </div>
+        )}
+        <AvailabilityHint schedule={partnerSchedule} partnerName={partnerName} />
+        {replyTo && (
+          <ReplyComposerPreview
+            title={replyTo.sender_id === currentUserId ? "Antwort auf deine Nachricht" : `Antwort an ${partnerName}`}
+            preview={quoteInfoFor(replyTo.id).preview}
+            onCancel={() => setReplyTo(null)}
+          />
         )}
         {attachment && (
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-night-border dark:bg-night-surface">
@@ -1470,7 +1682,7 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             </button>
           </div>
         )}
-        <form onSubmit={handleSubmit} className={`flex gap-2 ${isLetterMode ? "items-end" : "items-center"}`}>
+        <form onSubmit={handleSubmit} className="flex items-end gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -1501,7 +1713,10 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
           </button>
           <button
             type="button"
-            onClick={() => setMode(isLetterMode ? "chat" : "pigeon")}
+            onClick={() => {
+              setMode(isLetterMode ? "chat" : "pigeon");
+              composerRef.current?.focus();
+            }}
             aria-pressed={isLetterMode}
             aria-label={isLetterMode ? "Zurück zum normalen Chat" : "Stattdessen per Brieftaube schicken"}
             title={isLetterMode ? "Normaler Chat" : "Per Brieftaube schicken"}
@@ -1514,35 +1729,41 @@ export function ChatRoom({ chatId, me, partner, initialMessages, initialHasOlder
             🕊️
           </button>
           {/* text-base (16px) on phones: anything smaller makes iOS Safari
-              zoom the whole page in when the field gets focus. */}
-          {isLetterMode ? (
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onPaste={handlePaste}
-              onKeyDown={handleLetterKeyDown}
-              rows={3}
-              autoFocus
-              placeholder={`Liebe/r ${partnerName}, …`}
-              className="min-w-0 flex-1 resize-none rounded-xl border border-[#d8c9a3] px-3 py-2 font-serif text-base sm:text-sm dark:border-night-border"
-            />
-          ) : (
-            <input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onPaste={handlePaste}
-              placeholder="Nachricht schreiben..."
-              className="min-w-0 flex-1 rounded-full border border-neutral-300 px-4 py-2 text-base sm:text-sm dark:border-night-border"
-            />
-          )}
+              zoom the whole page in when the field gets focus. One
+              textarea for both modes, so switching keeps focus and text. */}
+          <textarea
+            ref={composerRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onPaste={handlePaste}
+            onKeyDown={handleComposerKeyDown}
+            rows={isLetterMode ? 3 : 1}
+            enterKeyHint={isLetterMode ? "enter" : "send"}
+            aria-label={isLetterMode ? `Brief an ${partnerName}` : "Nachricht"}
+            placeholder={isLetterMode ? `Liebe/r ${partnerName}, …` : "Nachricht schreiben…"}
+            className={`min-w-0 flex-1 resize-none overflow-hidden border px-4 py-1.5 text-base leading-6 sm:text-sm sm:leading-6 ${
+              isLetterMode
+                ? "rounded-xl border-[#d8c9a3] font-serif dark:border-night-border"
+                : "rounded-[1.25rem] border-neutral-300 dark:border-night-border"
+            }`}
+          />
           {hasSendableContent ? (
             <button
               type="submit"
-              className={`flex-shrink-0 rounded-full px-4 py-2 text-sm disabled:opacity-50 ${
-                isLetterMode ? "bg-[#c1643a] text-white" : "bg-accent text-on-accent"
+              // Keeps the focus (and the phone keyboard) in the text field.
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label={isLetterMode ? "Losfliegen" : "Senden"}
+              className={`flex-shrink-0 rounded-full text-sm ${
+                isLetterMode ? "bg-[#c1643a] px-4 py-2 text-white" : "bg-accent p-2 text-on-accent"
               }`}
             >
-              {isLetterMode ? "Losfliegen" : "Senden"}
+              {isLetterMode ? (
+                "Losfliegen"
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.27 3.13a59.77 59.77 0 0 1 18.22 8.87 59.77 59.77 0 0 1-18.22 8.88L6 12Zm0 0h7.5" />
+                </svg>
+              )}
             </button>
           ) : (
             <VoiceRecorderButton

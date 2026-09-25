@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, MessageKind } from "@/lib/supabase/types";
 import { MEMBER_PROFILE_COLUMNS, type MemberProfile } from "@/lib/profile";
 import { sortByActivity } from "@/lib/chat/chat-list-store";
+import { loadSchedules, type Schedule } from "@/lib/schedule/schedule";
 
 type PigeonClient = SupabaseClient<Database, "pigeon">;
 
@@ -18,6 +19,8 @@ export interface ChatListItem {
   incomingLetterIds: string[];
   /** Messages from the partner I haven't seen yet (landed letters included). */
   unreadCount: number;
+  /** The partner's Wochenplan, if visible to me (availability dot). */
+  schedule: Schedule | null;
 }
 
 export interface ChatOverview {
@@ -41,7 +44,7 @@ export function previewOf(m: {
 }
 
 /**
- * Everything the dashboard and the chat sidebar show, in six queries
+ * Everything the dashboard and the chat sidebar show, in eight queries
  * regardless of chat count. Relies on RLS for scoping: members see all
  * member profiles, only their own chats, and — importantly — no content of
  * pigeon letters still in flight to them (those simply aren't returned).
@@ -64,7 +67,7 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
     };
   }
 
-  const [{ data: otherRows }, { data: latestMessages }, { data: openFlights }, { data: unreadRows }] = await Promise.all([
+  const [{ data: otherRows }, { data: latestMessages }, { data: openFlights }, { data: unreadRows }, schedules] = await Promise.all([
     supabase.from("chat_participants").select("chat_id, user_id").in("chat_id", chatIds).neq("user_id", userId),
     // Exactly one row per chat (RLS-aware SQL function, see
     // supabase/migrations/20260924030000_latest_message_per_chat.sql).
@@ -77,6 +80,11 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
       .neq("sender_id", userId),
     // supabase/migrations/20260926000000_unread_and_chat_presence.sql
     supabase.rpc("unread_counts_for_chats", { p_chat_ids: chatIds }),
+    // RLS only returns the plans I may see (the admin's; all for the admin).
+    loadSchedules(
+      supabase,
+      Array.from(profileById.values()).filter((p) => p.id !== userId)
+    ),
   ]);
 
   const lastByChat = new Map((latestMessages ?? []).map((m) => [m.chat_id, m]));
@@ -107,6 +115,7 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
         : null,
       incomingLetterIds: incomingByChat.get(row.chat_id) ?? [],
       unreadCount: unreadByChat.get(row.chat_id) ?? 0,
+      schedule: schedules[partner.id] ?? null,
     });
   }
 
