@@ -234,6 +234,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      // supabase/migrations/20260929000000_translation_history.sql
+      translations: {
+        Row: {
+          id: string;
+          user_id: string;
+          source_lang: string;
+          target_lang: string;
+          source_text: string;
+          translated_text: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          source_lang: string;
+          target_lang: string;
+          source_text: string;
+          translated_text: string;
+          created_at?: string;
+        };
+        Update: {
+          source_lang?: string;
+          translated_text?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       // supabase/migrations/20260928000000_weekly_schedule.sql
       schedule_blocks: {
         Row: {
@@ -316,6 +343,11 @@ export interface Database {
       unread_counts_for_chats: {
         Args: { p_chat_ids: string[] };
         Returns: { chat_id: string; unread: number }[];
+      };
+      // supabase/migrations/20260929010000_search_translations.sql
+      search_translations: {
+        Args: { p_query?: string | null; p_before?: string | null; p_limit?: number };
+        Returns: Database["pigeon"]["Tables"]["translations"]["Row"][];
       };
       mark_chat_read: {
         Args: { p_chat_id: string; p_viewing?: boolean };

@@ -4,6 +4,7 @@ import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import { MEMBER_PROFILE_COLUMNS, type MemberProfile } from "@/lib/profile";
 import { usage } from "@/lib/translate/deepl";
+import { loadHistory } from "./actions";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { Translator } from "@/components/translate/translator";
@@ -20,9 +21,10 @@ export default async function TranslatePage() {
   }
 
   const configured = !!process.env.DEEPL_API_KEY;
-  const [{ data: profile }, initialUsage] = await Promise.all([
+  const [{ data: profile }, initialUsage, initialHistory] = await Promise.all([
     supabase.from("profiles").select(MEMBER_PROFILE_COLUMNS).eq("id", user.id).maybeSingle(),
     configured ? usage() : Promise.resolve(null),
+    loadHistory(),
   ]);
 
   return (
@@ -45,7 +47,7 @@ export default async function TranslatePage() {
       </div>
 
       {configured ? (
-        <Translator initialUsage={initialUsage} />
+        <Translator initialUsage={initialUsage} initialHistory={initialHistory} />
       ) : (
         <p className="rounded-xl border border-dashed border-neutral-300 p-4 text-sm text-neutral-500 dark:border-night-border dark:text-night-muted">
           Der Übersetzer ist noch nicht eingerichtet: <code>DEEPL_API_KEY</code> fehlt in den
