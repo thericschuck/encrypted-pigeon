@@ -16,20 +16,11 @@ import {
 import { AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, MessageKind } from "@/lib/supabase/types";
-import { ChatUploadError, uploadToBucket } from "@/lib/chat/storage-upload";
-import {
-  CHAT_IMAGE_BUCKET,
-  buildChatAttachmentPath,
-  compressChatImage,
-} from "@/lib/chat/image-upload";
+import { CHAT_IMAGE_BUCKET } from "@/lib/chat/image-upload";
 import { CHAT_VIDEO_BUCKET } from "@/lib/chat/buckets";
 import { looksLikeImage } from "@/lib/media/image";
-import { VideoTooLargeError, looksLikeVideo, processVideo } from "@/lib/media/video";
-import {
-  CHAT_VOICE_BUCKET,
-  baseMimeType,
-  buildChatVoicePath,
-} from "@/lib/chat/voice-recording";
+import { looksLikeVideo } from "@/lib/media/video";
+import { CHAT_VOICE_BUCKET } from "@/lib/chat/voice-recording";
 import { FLIGHT_COLUMNS, type FlightRow } from "@/lib/chat/flights";
 import { CHAT_PAGE_SIZE } from "@/lib/chat/pagination";
 import { previewOf } from "@/lib/chat/chat-overview";
@@ -66,29 +57,16 @@ import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
 import { AvailabilityHint } from "@/components/chat/availability-hint";
 import type { Schedule } from "@/lib/schedule/schedule";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  discardMessage,
+  retryMessage,
+  sendMessage,
+  useOutbox,
+  type DisplayMessage,
+  type PendingAttachment,
+} from "@/lib/chat/outbox";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
-
-type PendingAttachment =
-  | { kind: "image"; file: File; previewUrl: string }
-  | { kind: "video"; file: File; previewUrl: string }
-  | { kind: "voice"; blob: Blob; previewUrl: string; durationSeconds: number; mimeType: string };
-
-type DisplayMessage = MessageRow & {
-  pending?: boolean;
-  // Present (0-100) while an attachment is uploading; undefined once the
-  // message is fully sent or before any attachment finishes.
-  uploadProgress?: number;
-  /** What uploadProgress measures: shrinking the file first, then sending it. */
-  uploadPhase?: "processing" | "uploading";
-  uploadError?: string;
-  // Local object URLs, kept around so we can show an instant preview and
-  // support "retry" without re-picking the file / re-recording.
-  localImagePreview?: string;
-  localAudioPreview?: string;
-  localVideoPreview?: string;
-  pendingAttachment?: PendingAttachment;
-};
 
 // What the message list renders: real messages, plus a placeholder for
 // every pigeon letter flying towards me that I'm not allowed to read yet.
@@ -136,13 +114,6 @@ const COMPOSER_MAX_HEIGHT_PX = { chat: 160, pigeon: 280 } as const;
 // Unsent text per chat and device, like WhatsApp drafts.
 function draftStorageKey(userId: string, chatId: string) {
   return `pigeon-draft:${userId}:${chatId}`;
-}
-
-function sendErrorMessage(): string {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    return "Keine Internetverbindung. Nachricht wurde nicht gesendet.";
-  }
-  return "Nachricht konnte nicht gesendet werden.";
 }
 
 function formatRemainingShort(arrivalIso: string | null, now: number): string | null {
@@ -337,6 +308,37 @@ export function ChatRoom({
     },
     [chatId, currentUserId]
   );
+
+  // Messages I'm sending live in the outbox (lib/chat/outbox.ts), not in
+  // this component — so a send keeps going, visibly, when I leave the
+  // chat and come back. Sent ones join the regular messages.
+  const outbox = useOutbox(chatId);
+  useEffect(() => {
+    const known = new Set(messagesRef.current.map((m) => m.id));
+    const sent = outbox.flatMap((m) => (m.serverRow && !known.has(m.id) ? [m.serverRow] : []));
+    if (sent.length > 0) appendServerMessages(sent);
+  }, [appendServerMessages, outbox]);
+
+  // Server rows, still showing the local preview of anything I just sent
+  // (until its signed URL is there), plus whatever is still on its way.
+  const displayMessages = useMemo<DisplayMessage[]>(() => {
+    if (outbox.length === 0) return messages;
+    const outboxById = new Map(outbox.map((m) => [m.id, m]));
+    const known = new Set<string>();
+    const merged = messages.map((m) => {
+      known.add(m.id);
+      const local = outboxById.get(m.id);
+      return local
+        ? {
+            ...m,
+            localImagePreview: local.localImagePreview,
+            localAudioPreview: local.localAudioPreview,
+            localVideoPreview: local.localVideoPreview,
+          }
+        : m;
+    });
+    return [...merged, ...outbox.filter((m) => !known.has(m.id))];
+  }, [messages, outbox]);
 
   const mergeFlights = useCallback((rows: FlightRow[]) => {
     if (rows.length === 0) return;
@@ -700,7 +702,7 @@ export function ChatRoom({
 
   useEffect(() => {
     const refs: StorageRef[] = [];
-    for (const m of messages) {
+    for (const m of displayMessages) {
       if (m.image_url && !requestedSignedUrlPaths.current.has(m.image_url)) {
         refs.push({ bucket: CHAT_IMAGE_BUCKET, path: m.image_url });
       }
@@ -712,15 +714,15 @@ export function ChatRoom({
       }
     }
     if (refs.length > 0) fetchSignedUrls(refs);
-  }, [messages, fetchSignedUrls]);
+  }, [displayMessages, fetchSignedUrls]);
 
-  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  const messagesById = useMemo(() => new Map(displayMessages.map((m) => [m.id, m])), [displayMessages]);
 
   // Replies quoting something older than the loaded window: fetch just
   // those originals by id (RLS decides whether I may read them).
   useEffect(() => {
     const missing = new Set<string>();
-    for (const m of messages) {
+    for (const m of displayMessages) {
       const id = m.reply_to_id;
       if (id && !messagesById.has(id) && !requestedQuotedIds.current.has(id)) missing.add(id);
     }
@@ -745,7 +747,7 @@ export function ChatRoom({
           return next;
         });
       });
-  }, [messages, messagesById]);
+  }, [displayMessages, messagesById]);
 
   function quoteInfoFor(quotedId: string): QuoteInfo {
     const quoted = messagesById.get(quotedId) ?? quotedOutsideWindow[quotedId];
@@ -799,7 +801,7 @@ export function ChatRoom({
   // "delivered"), everything else at send time; incoming pigeons sit at
   // their departure time until they land and become the letter.
   const timeline = useMemo<TimelineItem[]>(() => {
-    const items: TimelineItem[] = messages.map((message) => {
+    const items: TimelineItem[] = displayMessages.map((message) => {
       const flight = flights[message.id];
       const sortAt =
         message.kind === "pigeon" && message.sender_id !== currentUserId && flight?.arrival_time
@@ -807,7 +809,7 @@ export function ChatRoom({
           : Date.parse(message.created_at);
       return { type: "message", key: message.id, sortAt, message };
     });
-    const known = new Set(messages.map((m) => m.id));
+    const known = new Set(displayMessages.map((m) => m.id));
     for (const flight of Object.values(flights)) {
       if (
         flight.sender_id &&
@@ -824,7 +826,7 @@ export function ChatRoom({
       }
     }
     return items.sort((a, b) => a.sortAt - b.sortAt);
-  }, [currentUserId, flights, messages, now]);
+  }, [currentUserId, displayMessages, flights, now]);
 
   // Only items that show up after the first render get the entrance
   // animation — opening a chat doesn't make the whole history jump in.
@@ -972,149 +974,6 @@ export function ChatRoom({
     });
   }
 
-  function updateMessage(id: string, patch: Partial<DisplayMessage>) {
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  }
-
-  function updateUploadProgress(id: string, fraction: number) {
-    updateMessage(id, { uploadProgress: Math.round(fraction * 100) });
-  }
-
-  // Shared by the initial send and by "Erneut versuchen" (retry), so both
-  // paths go through the exact same upload + insert logic and leave the
-  // message bubble in a consistent state. Resolves true once the message
-  // row exists on the server.
-  async function performSend(
-    id: string,
-    text: string | null,
-    attachmentToSend: PendingAttachment | null,
-    kind: MessageKind,
-    replyToId: string | null
-  ): Promise<boolean> {
-    const supabase = createClient();
-    let imagePath: string | null = null;
-    let audioPath: string | null = null;
-    let videoPath: string | null = null;
-    let audioDuration: number | null = null;
-
-    updateMessage(id, {
-      uploadError: undefined,
-      uploadProgress: attachmentToSend ? 0 : undefined,
-      uploadPhase: attachmentToSend && attachmentToSend.kind !== "voice" ? "processing" : "uploading",
-    });
-
-    if (attachmentToSend) {
-      try {
-        // getSession() also refreshes an expired access token; if that
-        // fails there's no session left to upload with.
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-        if (!accessToken) {
-          redirectToLoginForExpiredSession();
-          return false;
-        }
-
-        if (attachmentToSend.kind === "image" || attachmentToSend.kind === "video") {
-          const isVideo = attachmentToSend.kind === "video";
-          const processed = isVideo
-            ? await processVideo(attachmentToSend.file, (fraction) => updateUploadProgress(id, fraction))
-            : await compressChatImage(attachmentToSend.file);
-          updateMessage(id, { uploadPhase: "uploading", uploadProgress: 0 });
-          const path = buildChatAttachmentPath(chatId, id, processed.extension);
-          // Processing a long video can take minutes; getSession() hands
-          // out a refreshed token if the first one expired meanwhile.
-          const { data: freshSession } = await supabase.auth.getSession();
-          await uploadToBucket({
-            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            apiKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            accessToken: freshSession.session?.access_token ?? accessToken,
-            bucket: isVideo ? CHAT_VIDEO_BUCKET : CHAT_IMAGE_BUCKET,
-            path,
-            file: processed.blob,
-            contentType: processed.contentType,
-            onProgress: (fraction) => updateUploadProgress(id, fraction),
-          });
-          if (isVideo) videoPath = path;
-          else imagePath = path;
-        } else {
-          const path = buildChatVoicePath(chatId, id, attachmentToSend.mimeType);
-          const contentType = baseMimeType(attachmentToSend.mimeType);
-          await uploadToBucket({
-            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            apiKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            accessToken,
-            bucket: CHAT_VOICE_BUCKET,
-            path,
-            file: attachmentToSend.blob,
-            contentType,
-            onProgress: (fraction) => updateUploadProgress(id, fraction),
-          });
-          audioPath = path;
-          audioDuration = Math.round(attachmentToSend.durationSeconds);
-        }
-      } catch (error) {
-        if (error instanceof ChatUploadError && error.status === 401) {
-          redirectToLoginForExpiredSession();
-          return false;
-        }
-        const message =
-          typeof navigator !== "undefined" && !navigator.onLine
-            ? "Keine Internetverbindung. Upload fehlgeschlagen."
-            : error instanceof ChatUploadError
-              ? error.message
-              : error instanceof VideoTooLargeError
-                ? error.message === "unsupported"
-                  ? "Dieser Browser kann das Video nicht verkleinern. Bitte Browser aktualisieren oder anderes Gerät nutzen."
-                  : "Video ist zu lang (über ca. 1,5 Std.), um es klein genug zu rechnen."
-                : "Upload fehlgeschlagen. Bitte erneut versuchen.";
-        updateMessage(id, { uploadError: message, uploadProgress: undefined });
-        return false;
-      }
-    }
-
-    // For a pigeon letter this insert is also what launches the flight
-    // (server-side trigger -> start-pigeon-flight).
-    const { error } = await supabase.from("messages").insert({
-      id,
-      chat_id: chatId,
-      sender_id: currentUserId,
-      kind,
-      content: text,
-      image_url: imagePath,
-      audio_url: audioPath,
-      audio_duration_seconds: audioDuration,
-      video_url: videoPath,
-      reply_to_id: replyToId,
-    });
-
-    // 23505 = this id already exists: an earlier attempt did reach the
-    // server, only its response got lost. That's a success, not a failure.
-    if (error && error.code !== "23505") {
-      if (isSessionExpiredError(error)) {
-        redirectToLoginForExpiredSession();
-        return false;
-      }
-      console.error("Failed to send message:", error.message);
-      updateMessage(id, { uploadError: sendErrorMessage(), uploadProgress: undefined });
-      return false;
-    }
-
-    // Local preview stays around as a fallback source until the signed URL
-    // for the real upload resolves, so the bubble never flashes a broken
-    // image/player right after a successful send.
-    updateMessage(id, {
-      pending: false,
-      image_url: imagePath,
-      audio_url: audioPath,
-      audio_duration_seconds: audioDuration,
-      video_url: videoPath,
-      uploadProgress: undefined,
-      uploadError: undefined,
-      pendingAttachment: undefined,
-    });
-    return true;
-  }
-
   function submitMessage() {
     const text = draft.trim();
     const attachmentToSend = attachment;
@@ -1133,44 +992,25 @@ export function ChatRoom({
     setReplyTo(null);
 
     const id = crypto.randomUUID();
-    const optimisticMessage: DisplayMessage = {
-      id,
-      chat_id: chatId,
-      sender_id: currentUserId,
-      kind,
-      content: text || null,
-      image_url: null,
-      audio_url: null,
-      audio_duration_seconds: null,
-      video_url: null,
-      reply_to_id: replyToId,
-      created_at: new Date().toISOString(),
-      pending: true,
-      ...(attachmentToSend
-        ? {
-            uploadProgress: 0,
-            pendingAttachment: attachmentToSend,
-            ...(attachmentToSend.kind === "image"
-              ? { localImagePreview: attachmentToSend.previewUrl }
-              : attachmentToSend.kind === "video"
-              ? { localVideoPreview: attachmentToSend.previewUrl }
-              : {
-                  localAudioPreview: attachmentToSend.previewUrl,
-                  audio_duration_seconds: attachmentToSend.durationSeconds,
-                }),
-          }
-        : {}),
-    };
-
+    // The preview URL now belongs to the outbox: it has to outlive this
+    // component if I leave the chat mid-upload.
+    if (attachmentToSend) objectUrlsRef.current.delete(attachmentToSend.previewUrl);
     isAtBottomRef.current = true;
-    setMessages((prev) => [...prev, optimisticMessage]);
+    const sending = sendMessage({
+      id,
+      chatId,
+      senderId: currentUserId,
+      kind,
+      text: text || null,
+      replyToId,
+      attachment: attachmentToSend,
+    });
 
     if (kind === "chat") {
       // Instant chat: the message goes out right away in the background
       // (the recipient has it immediately); the sender sees the bubble at
       // once, with the hacker show playing in the chat background.
       setEncryptingId(id);
-      void performSend(id, text || null, attachmentToSend, "chat", replyToId);
       return;
     }
 
@@ -1179,7 +1019,7 @@ export function ChatRoom({
     // ready" state until the flight row arrives a beat later. Back to
     // chat mode afterwards: letters are the deliberate exception.
     setMode("chat");
-    void performSend(id, text || null, attachmentToSend, "pigeon", replyToId).then((ok) => {
+    void sending.then((ok) => {
       if (ok) setOpenFlightMessageId(id);
     });
   }
@@ -1213,24 +1053,16 @@ export function ChatRoom({
   // A failed send ends the show right away — the bubble shows the error
   // and retry button instead.
   const encryptingFailed = encryptingId
-    ? messages.some((m) => m.id === encryptingId && !!m.uploadError)
+    ? displayMessages.some((m) => m.id === encryptingId && !!m.uploadError)
     : false;
   useEffect(() => {
     if (encryptingFailed) setEncryptingId(null);
   }, [encryptingFailed]);
 
   function retrySend(message: DisplayMessage) {
-    void performSend(
-      message.id,
-      message.content,
-      message.pendingAttachment ?? null,
-      message.kind,
-      message.reply_to_id
-    ).then(
-      (ok) => {
-        if (ok && message.kind === "pigeon") setOpenFlightMessageId(message.id);
-      }
-    );
+    void retryMessage(message.id).then((ok) => {
+      if (ok && message.kind === "pigeon") setOpenFlightMessageId(message.id);
+    });
   }
 
   const closeFlightMap = useCallback(() => setOpenFlightMessageId(null), []);
@@ -1285,7 +1117,7 @@ export function ChatRoom({
   const openFlight = openFlightMessageId ? flights[openFlightMessageId] : undefined;
   const openFlightIsMine = openFlight
     ? openFlight.sender_id === currentUserId
-    : messages.some((m) => m.id === openFlightMessageId && m.sender_id === currentUserId);
+    : displayMessages.some((m) => m.id === openFlightMessageId && m.sender_id === currentUserId);
 
   function renderMessage(message: DisplayMessage) {
     const isOwn = message.sender_id === currentUserId;
@@ -1475,6 +1307,13 @@ export function ChatRoom({
                 className="rounded-full bg-black/10 px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline dark:bg-white/15"
               >
                 Erneut versuchen
+              </button>
+              <button
+                type="button"
+                onClick={() => discardMessage(message.id)}
+                className="rounded-full px-2 py-0.5 text-xs opacity-80 underline-offset-2 hover:underline"
+              >
+                Verwerfen
               </button>
             </div>
           )}
