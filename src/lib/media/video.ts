@@ -22,9 +22,14 @@ export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 // up too big, the next attempt aims lower by exactly the overshoot.
 const TARGET_BYTES = 42 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
-// Small, already browser-friendly clips are sent untouched.
+// Small clips are sent untouched — but only if every browser can show
+// them: H.264 in MP4 or VP8/VP9 in WebM. An HEVC clip (iPhone default)
+// in an .mp4 plays as a black box with sound in many browsers.
 const PASSTHROUGH_MAX_BYTES = 8 * 1024 * 1024;
-const PASSTHROUGH_TYPES = ["video/mp4", "video/webm"];
+const PASSTHROUGH_CODECS: Record<string, string[]> = {
+  "video/mp4": ["avc"],
+  "video/webm": ["vp8", "vp9"],
+};
 
 const MAX_VIDEO_BITRATE = 2_500_000;
 // Below this even a tiny picture turns to mush; longer videos get fewer
@@ -42,7 +47,10 @@ export class VideoTooLargeError extends Error {}
 /** Resolution, frame rate and audio quality that suit a given bit budget. */
 function settingsFor(totalBitrate: number) {
   const audioBitrate = totalBitrate >= 600_000 ? 96_000 : totalBitrate >= 150_000 ? 48_000 : 24_000;
-  const videoBitrate = Math.max(MIN_VIDEO_BITRATE, Math.min(MAX_VIDEO_BITRATE, totalBitrate - audioBitrate));
+  // Whole bits per second: Quality({ bitrate }) rejects fractions.
+  const videoBitrate = Math.round(
+    Math.max(MIN_VIDEO_BITRATE, Math.min(MAX_VIDEO_BITRATE, totalBitrate - audioBitrate))
+  );
   const longSide =
     videoBitrate >= 1_500_000 ? 1280
     : videoBitrate >= 700_000 ? 960
@@ -74,7 +82,10 @@ async function transcode(
     const { audioBitrate, videoBitrate, longSide, frameRate } = settingsFor((targetBytes * 8) / duration);
     const scale = Math.min(1, longSide / Math.max(width, height));
 
-    const run = async (audioCodec: "aac" | "opus") => {
+    const run = async (
+      audioCodec: "aac" | "opus",
+      hardwareAcceleration: "no-preference" | "prefer-software" = "no-preference"
+    ) => {
       const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() });
       const conversion = await Conversion.init({
         input,
@@ -85,23 +96,34 @@ async function transcode(
           height: even(height * scale),
           fit: "contain",
           codec: "avc",
-          quality: new Quality(videoBitrate),
+          // { bitrate } — a bare number would be a quality *level* (0-1),
+          // and 2,500,000 on that scale made encoders reject the track.
+          quality: new Quality({ bitrate: videoBitrate }),
           ...(frameRate ? { frameRate } : {}),
           forceTranscode: true,
+          hardwareAcceleration,
         },
-        audio: { codec: audioCodec, quality: new Quality(audioBitrate), numberOfChannels: 2 },
+        audio: { codec: audioCodec, quality: new Quality({ bitrate: audioBitrate }), numberOfChannels: 2 },
         showWarnings: false,
       });
       return { output, conversion };
     };
 
-    let { output, conversion } = await run("aac");
+    let audioCodec: "aac" | "opus" = "aac";
+    let { output, conversion } = await run(audioCodec);
     // Some browsers can't encode AAC — Opus in MP4 still plays everywhere
     // current, which beats silently dropping the sound.
     if (conversion.discardedTracks.some((d) => d.track.isAudioTrack() && d.reason === "no_encodable_target_codec")) {
-      ({ output, conversion } = await run("opus"));
+      audioCodec = "opus";
+      ({ output, conversion } = await run(audioCodec));
     }
-    if (!conversion.isValid) throw new Error("cannot convert");
+    // Some hardware H.264 encoders refuse a size/bitrate combination the
+    // software encoder handles fine.
+    const lostVideo = () => conversion.discardedTracks.some((d) => d.track.isVideoTrack());
+    if (lostVideo()) ({ output, conversion } = await run(audioCodec, "prefer-software"));
+    // Never ship a "video" without a picture: that's exactly the black,
+    // sound-only clip this used to produce. Fall back instead (processVideo).
+    if (!conversion.isValid || lostVideo()) throw new Error("cannot convert video track");
 
     conversion.onProgress = (progress) => onProgress?.(progress);
     await conversion.execute();
@@ -111,6 +133,24 @@ async function transcode(
     return { blob: new Blob([buffer], { type: "video/mp4" }), contentType: "video/mp4", extension: "mp4" };
   } finally {
     input.dispose();
+  }
+}
+
+/** Small MP4/WebM whose picture every browser can decode — no need to re-encode. */
+async function isBrowserFriendly(file: File): Promise<boolean> {
+  const allowed = PASSTHROUGH_CODECS[file.type];
+  if (!allowed) return false;
+  try {
+    const { ALL_FORMATS, BlobSource, Input } = await import("mediabunny");
+    const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+    try {
+      const codec = await (await input.getPrimaryVideoTrack())?.getCodec();
+      return !!codec && allowed.includes(codec);
+    } finally {
+      input.dispose();
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -131,7 +171,7 @@ async function keepScreenOn(): Promise<() => void> {
 }
 
 export async function processVideo(file: File, onProgress?: (fraction: number) => void): Promise<ProcessedVideo> {
-  if (file.size <= PASSTHROUGH_MAX_BYTES && PASSTHROUGH_TYPES.includes(file.type)) return asIs(file);
+  if (file.size <= PASSTHROUGH_MAX_BYTES && (await isBrowserFriendly(file))) return asIs(file);
 
   const releaseScreen = await keepScreenOn();
   try {
@@ -147,8 +187,9 @@ export async function processVideo(file: File, onProgress?: (fraction: number) =
     }
     throw new VideoTooLargeError();
   } catch (error) {
-    // No WebCodecs (older browsers) or a codec the device can't decode:
-    // the original still works if it fits.
+    // No WebCodecs (older browsers) or a codec the device can't decode or
+    // encode: the original is the best we have if it fits — it plays at
+    // least wherever the recipient's browser knows its codec.
     if (file.size <= MAX_VIDEO_BYTES) return asIs(file);
     if (error instanceof VideoTooLargeError) throw error;
     console.error("Video conversion failed:", error);

@@ -47,6 +47,7 @@ import {
 } from "@/lib/auth/session-expiry";
 import { displayNameOf, pigeonNameOf, type MemberProfile } from "@/lib/profile";
 import { ImageLightbox } from "@/components/chat/image-lightbox";
+import { ChatVideo, VideoLightbox } from "@/components/chat/chat-video";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
 import { EncryptionBackdrop } from "@/components/chat/encryption-sequence";
@@ -218,6 +219,7 @@ export function ChatRoom({
   const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [videoLightboxSrc, setVideoLightboxSrc] = useState<string | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [attachmentLoadErrors, setAttachmentLoadErrors] = useState<Record<string, string>>({});
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -1233,6 +1235,7 @@ export function ChatRoom({
 
   const closeFlightMap = useCallback(() => setOpenFlightMessageId(null), []);
   const closeLightbox = useCallback(() => setLightboxSrc(null), []);
+  const closeVideoLightbox = useCallback(() => setVideoLightboxSrc(null), []);
 
   const hasSendableContent = !!draft.trim() || !!attachment;
   const isLetterMode = mode === "pigeon";
@@ -1360,18 +1363,16 @@ export function ChatRoom({
           )}
           {videoSrc && (
             <div className="relative w-60 max-w-full overflow-hidden rounded-xl bg-black">
-              <video
+              <ChatVideo
                 src={videoSrc}
-                controls={!isUploading || hasError}
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={handleMediaLoaded}
+                interactive={!isUploading || hasError}
+                onOpen={() => setVideoLightboxSrc(videoSrc)}
+                onLoaded={handleMediaLoaded}
                 onError={() => {
                   if (message.video_url && signedUrls[message.video_url]) {
                     refreshSignedUrl({ bucket: CHAT_VIDEO_BUCKET, path: message.video_url });
                   }
                 }}
-                className="max-h-72 w-full"
               />
               {isUploading && !hasError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 text-xs text-white">
@@ -1774,6 +1775,7 @@ export function ChatRoom({
         </form>
       </div>
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={closeLightbox} />}
+      {videoLightboxSrc && <VideoLightbox src={videoLightboxSrc} onClose={closeVideoLightbox} />}
       <AnimatePresence>
         {openFlightMessageId && (
           <PigeonFlightMap
