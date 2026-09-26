@@ -356,6 +356,8 @@ export interface Database {
           content: string;
           reasoning: string | null;
           model: string | null;
+          // Paths in the pigeon-ai-images bucket ("{owner_id}/…").
+          images: string[];
           created_at: string;
         };
         Insert: {
@@ -365,6 +367,7 @@ export interface Database {
           content: string;
           reasoning?: string | null;
           model?: string | null;
+          images?: string[];
           created_at?: string;
         };
         Update: {
@@ -374,6 +377,47 @@ export interface Database {
           content?: string;
           reasoning?: string | null;
           model?: string | null;
+          images?: string[];
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      // supabase/migrations/20260930010000_ai_memory.sql
+      ai_settings: {
+        Row: {
+          owner_id: string;
+          instructions: string;
+          updated_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          instructions?: string;
+          updated_at?: string;
+        };
+        Update: {
+          owner_id?: string;
+          instructions?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      ai_memories: {
+        Row: {
+          id: string;
+          owner_id: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          content?: string;
           created_at?: string;
         };
         Relationships: [];

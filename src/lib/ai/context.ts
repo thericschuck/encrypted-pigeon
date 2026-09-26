@@ -12,6 +12,10 @@ interface PromptInput {
   name: string;
   timezone: string;
   schedule: Schedule | null;
+  /** The owner's own instructions (how to answer), editable in /ai. */
+  instructions: string;
+  /** Facts the owner saved about themselves, editable in /ai. */
+  memories: string[];
   now?: Date;
 }
 
@@ -28,26 +32,42 @@ function formatNow(now: Date, timeZone: string) {
 }
 
 /**
- * The system prompt: who the assistant talks to, their local time, and
- * today's Wochenplan — so "wann hab ich heute frei?" or "wie spät ist es
- * jetzt in Deutschland?" just work. AI_USER_CONTEXT (optional env) adds
- * free-form background ("Ich trainiere Kung Fu in Dengfeng …").
+ * The system prompt: who the assistant talks to, their own instructions
+ * and saved memory, their local time and today's Wochenplan — so "wann hab
+ * ich heute frei?" or "was ist das?" (photo from a shop in Dengfeng) get
+ * answers that fit.
  */
-export function buildSystemPrompt({ name, timezone, schedule, now = new Date() }: PromptInput): string {
+export function buildSystemPrompt({ name, timezone, schedule, instructions, memories, now = new Date() }: PromptInput): string {
   const lines = [
     `Du bist der persönliche KI-Assistent von ${name} in der privaten App „Encrypted Pigeon“.`,
     "Antworte auf Deutsch, außer du wirst in einer anderen Sprache angesprochen. Sei präzise, ehrlich und hilfreich, komm schnell auf den Punkt und nutze Markdown (Listen, **fett**, Tabellen, Code) nur, wo es die Antwort klarer macht.",
     "Wenn du etwas nicht sicher weißt, sag das offen, statt zu raten. Du hast keinen Internetzugang: Bei aktuellen Ereignissen, Preisen, Öffnungszeiten, Wetter oder Fahrplänen weise darauf hin, dass dein Wissen veraltet sein kann.",
+    "Bei Fotos (z.B. Produkte, Verpackungen, Schilder, Speisekarten, Medikamente): lies chinesischen Text vollständig ab, übersetze ihn, erkläre was es ist und wofür man es benutzt, und nenne Warnhinweise. Gib bei Medikamenten und Inhaltsstoffen an, wenn du dir nicht sicher bist.",
+  ];
+
+  if (memories.length > 0) {
+    lines.push("", `Was du über ${name} weißt (von ${name} selbst gespeichert):`);
+    for (const memory of memories) lines.push(`- ${memory}`);
+  }
+
+  if (instructions.trim()) {
+    lines.push(
+      "",
+      `Anweisungen von ${name}, wie du antworten sollst (haben Vorrang vor den allgemeinen Stilregeln oben):`,
+      instructions.trim()
+    );
+  }
+
+  lines.push(
+    "",
+    "Gedächtnis: Wenn dir der Nutzer in diesem Gespräch etwas Dauerhaftes über sich erzählt, das künftige Antworten verbessert (Wohnort, Tätigkeit, Vorlieben, Allergien, Ziele …) und das oben noch nicht steht, schreib ganz am Ende deiner Antwort eine eigene Zeile im Format [[merken: kurzer Fakt in der Ich-Form]]. Höchstens eine solche Zeile pro Antwort, nur bei wirklich neuen, dauerhaften Fakten, nie für Belangloses. Der Nutzer entscheidet selbst, ob es gespeichert wird.",
     "",
     "Kontext:",
-    `- Datum und Uhrzeit bei ${name}: ${formatNow(now, timezone)} (Zeitzone ${timezone})`,
-  ];
+    `- Datum und Uhrzeit bei ${name}: ${formatNow(now, timezone)} (Zeitzone ${timezone})`
+  );
   if (timezone !== "Europe/Berlin") {
     lines.push(`- In Deutschland ist es gerade: ${formatNow(now, "Europe/Berlin")}`);
   }
-
-  const background = process.env.AI_USER_CONTEXT?.trim();
-  if (background) lines.push(`- Über ${name}: ${background}`);
 
   if (schedule) {
     const today = zonedParts(now, schedule.timezone).dateKey;
@@ -68,7 +88,9 @@ export function buildSystemPrompt({ name, timezone, schedule, now = new Date() }
 }
 
 /** A short conversation title from the first question. */
-export function titleFrom(question: string): string {
+export function titleFrom(question: string, hasImages = false): string {
   const oneLine = question.replace(/\s+/g, " ").trim();
-  return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
+  if (!oneLine) return hasImages ? "📷 Foto" : "Neue Unterhaltung";
+  const title = oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
+  return hasImages ? `📷 ${title}` : title;
 }

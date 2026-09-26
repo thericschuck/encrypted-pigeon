@@ -3,26 +3,49 @@
  * Server-only: needs DEEPSEEK_API_KEY. The browser never talks to DeepSeek
  * — it talks to /api/ai/chat, which runs outside China, so this works from
  * there without a VPN.
+ *
+ * Models (V4, since 2026-07-24 the old deepseek-chat/-reasoner names are
+ * gone): Flash without thinking for "Schnell", Pro with thinking for
+ * "Gründlich", and the experimental vision model whenever photos are in
+ * play (V4-Flash/-Pro themselves are text-only). All overridable by env.
  */
 
 const API_URL = "https://api.deepseek.com/chat/completions";
 
 export type AiMode = "fast" | "deep";
 
-/** Model ids per mode; overridable in case DeepSeek renames them. */
-export function modelFor(mode: AiMode): string {
-  return mode === "deep"
-    ? process.env.DEEPSEEK_REASONER_MODEL || "deepseek-reasoner"
-    : process.env.DEEPSEEK_CHAT_MODEL || "deepseek-chat";
-}
-
 export function isDeepSeekConfigured(): boolean {
   return !!process.env.DEEPSEEK_API_KEY;
 }
 
+export type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
+}
+
+export interface ModelChoice {
+  model: string;
+  /** Extra request fields (thinking switch). */
+  params: Record<string, unknown>;
+}
+
+export function chooseModel(mode: AiMode, withImages: boolean): ModelChoice {
+  if (withImages) {
+    // Experimental endpoint: no documented thinking support, so none asked for.
+    return { model: process.env.DEEPSEEK_VISION_MODEL || "deepseek-v4-flash-vision-exp", params: {} };
+  }
+  if (mode === "deep") {
+    return {
+      model: process.env.DEEPSEEK_DEEP_MODEL || "deepseek-v4-pro",
+      params: { thinking: { type: "enabled" }, reasoning_effort: "high" },
+    };
+  }
+  return {
+    model: process.env.DEEPSEEK_FAST_MODEL || "deepseek-v4-flash",
+    params: { thinking: { type: "disabled" }, temperature: 0.7 },
+  };
 }
 
 export type StreamChunk = { type: "reasoning" | "content"; text: string };
@@ -34,7 +57,7 @@ function errorText(status: number, body: string): string {
   if (status === 402) return "Kein Guthaben mehr bei DeepSeek (402). Bitte auf platform.deepseek.com aufladen.";
   if (status === 429) return "Zu viele Anfragen an DeepSeek (429). Kurz warten und nochmal versuchen.";
   if (status >= 500) return `DeepSeek ist gerade überlastet oder gestört (${status}). Bitte gleich nochmal versuchen.`;
-  let detail = body.slice(0, 200);
+  let detail = body.slice(0, 300);
   try {
     detail = JSON.parse(body)?.error?.message ?? detail;
   } catch {
@@ -44,12 +67,12 @@ function errorText(status: number, body: string): string {
 }
 
 /**
- * Streams one answer as reasoning/content deltas (reasoning only comes
- * from the reasoner model). Throws DeepSeekError for API errors.
+ * Streams one answer as reasoning/content deltas (reasoning only in
+ * thinking mode). Throws DeepSeekError for API errors.
  */
 export async function* streamChat(
   messages: ChatMessage[],
-  mode: AiMode,
+  choice: ModelChoice,
   signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -58,14 +81,7 @@ export async function* streamChat(
   const response = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: modelFor(mode),
-      messages,
-      stream: true,
-      // The reasoner ignores temperature; for chat a bit below default
-      // keeps factual answers steadier.
-      ...(mode === "fast" ? { temperature: 0.7 } : {}),
-    }),
+    body: JSON.stringify({ model: choice.model, messages, stream: true, ...choice.params }),
     signal,
   });
 
