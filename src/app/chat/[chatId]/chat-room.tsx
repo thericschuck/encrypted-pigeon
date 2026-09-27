@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -39,6 +40,7 @@ import {
 import { displayNameOf, pigeonNameOf, type MemberProfile } from "@/lib/profile";
 import { ImageLightbox } from "@/components/chat/image-lightbox";
 import { ChatVideo, VideoLightbox } from "@/components/chat/chat-video";
+import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 import { VoiceRecorderButton, type RecordedVoice } from "@/components/chat/voice-recorder-button";
 import { EncryptionBackdrop } from "@/components/chat/encryption-sequence";
@@ -114,6 +116,64 @@ const COMPOSER_MAX_HEIGHT_PX = { chat: 160, pigeon: 280 } as const;
 // Unsent text per chat and device, like WhatsApp drafts.
 function draftStorageKey(userId: string, chatId: string) {
   return `pigeon-draft:${userId}:${chatId}`;
+}
+
+const timeFormat = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+function localDayStart(ms: number) {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** "Heute", "Gestern", the weekday within the last week, else the date. */
+function dayLabel(ms: number, now: number): string {
+  // Rounded: a day with a DST switch is 23 or 25 hours long.
+  const daysAgo = Math.round((localDayStart(now) - localDayStart(ms)) / 86_400_000);
+  if (daysAgo === 0) return "Heute";
+  if (daysAgo === 1) return "Gestern";
+  const date = new Date(ms);
+  if (daysAgo > 1 && daysAgo < 7) return date.toLocaleDateString("de-DE", { weekday: "long" });
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString("de-DE", { day: "numeric", month: "long", ...(sameYear ? {} : { year: "numeric" }) });
+}
+
+/** Sticky date pill between the messages of two different days. */
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none sticky top-0 z-10 flex justify-center py-1" role="separator" aria-label={label}>
+      <span className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-medium text-neutral-500 shadow-sm backdrop-blur dark:bg-night-raised/90 dark:text-night-muted">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Time (and for my own messages: 🕓 on its way / ✓ sent) in the corner of
+ * a bubble. `inline` floats it into the last line of the text, like
+ * WhatsApp, instead of taking a line of its own.
+ */
+function MessageMeta({ at, status, inline }: { at: number; status: "pending" | "sent" | null; inline?: boolean }) {
+  return (
+    <span
+      className={`flex select-none items-center gap-1 whitespace-nowrap font-sans text-[10px] leading-none opacity-60 ${
+        inline ? "relative top-2 float-right ml-2" : "justify-end"
+      }`}
+    >
+      {timeFormat.format(at)}
+      {status === "pending" && (
+        <svg aria-label="Wird gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-3 w-3">
+          <circle cx="8" cy="8" r="6" />
+          <path strokeLinecap="round" d="M8 4.8V8l2 1.5" />
+        </svg>
+      )}
+      {status === "sent" && (
+        <svg aria-label="Gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3 w-3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m3 8.5 3 3 7-7" />
+        </svg>
+      )}
+    </span>
+  );
 }
 
 function formatRemainingShort(arrivalIso: string | null, now: number): string | null {
@@ -205,6 +265,9 @@ export function ChatRoom({
   const [jumpTargetId, setJumpTargetId] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  // Where the cursor goes after an emoji was inserted / deleted.
+  const pendingCaretRef = useRef<number | null>(null);
   // Desktop (mouse + keyboard): Enter sends, Shift+Enter is a new line.
   // Touch screens: Enter is a new line, the button sends — like WhatsApp.
   const sendsOnEnterRef = useRef(false);
@@ -1029,7 +1092,68 @@ export function ChatRoom({
     submitMessage();
   }
 
+  // Phones: the emoji panel takes the keyboard's place (like WhatsApp) —
+  // opening it closes the keyboard, tapping the text field brings the
+  // keyboard back and closes the panel. Desktop: both at once.
+  function toggleEmojiPanel() {
+    const el = composerRef.current;
+    if (emojiOpen) {
+      setEmojiOpen(false);
+      el?.focus();
+      return;
+    }
+    setEmojiOpen(true);
+    if (sendsOnEnterRef.current) el?.focus();
+    else el?.blur();
+  }
+
+  function handleComposerFocus() {
+    if (emojiOpen && !sendsOnEnterRef.current) setEmojiOpen(false);
+  }
+
+  function selectionOf(el: HTMLTextAreaElement | null) {
+    return { start: el?.selectionStart ?? draft.length, end: el?.selectionEnd ?? draft.length };
+  }
+
+  function insertEmoji(emoji: string) {
+    const { start, end } = selectionOf(composerRef.current);
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    pendingCaretRef.current = start + emoji.length;
+  }
+
+  // ⌫ in the emoji panel: removes one whole character — an emoji like
+  // 👨‍👩‍👧 is several code points, and must not be cut in half.
+  function deleteBeforeCursor() {
+    const { start, end } = selectionOf(composerRef.current);
+    if (start !== end) {
+      setDraft(draft.slice(0, start) + draft.slice(end));
+      pendingCaretRef.current = start;
+      return;
+    }
+    if (start === 0) return;
+    const before = draft.slice(0, start);
+    const segments =
+      typeof Intl.Segmenter === "function"
+        ? Array.from(new Intl.Segmenter("de", { granularity: "grapheme" }).segment(before), (s) => s.segment)
+        : Array.from(before);
+    const cut = segments[segments.length - 1]?.length ?? 1;
+    setDraft(before.slice(0, before.length - cut) + draft.slice(end));
+    pendingCaretRef.current = start - cut;
+  }
+
+  useLayoutEffect(() => {
+    const caret = pendingCaretRef.current;
+    if (caret === null) return;
+    pendingCaretRef.current = null;
+    composerRef.current?.setSelectionRange(caret, caret);
+  }, [draft]);
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && emojiOpen) {
+      event.preventDefault();
+      setEmojiOpen(false);
+      return;
+    }
     if (event.key === "Escape" && replyTo) {
       event.preventDefault();
       setReplyTo(null);
@@ -1119,7 +1243,8 @@ export function ChatRoom({
     ? openFlight.sender_id === currentUserId
     : displayMessages.some((m) => m.id === openFlightMessageId && m.sender_id === currentUserId);
 
-  function renderMessage(message: DisplayMessage) {
+  // `at`: when it counts as sent — for a letter to me, when it landed.
+  function renderMessage(message: DisplayMessage, at: number) {
     const isOwn = message.sender_id === currentUserId;
     const isLetter = message.kind === "pigeon";
     const imageSrc =
@@ -1144,6 +1269,10 @@ export function ChatRoom({
         : "bg-neutral-100 text-neutral-900 dark:bg-night-raised dark:text-night-text";
 
     const isEncrypting = message.id === encryptingId && !hasError;
+    const metaStatus = !isOwn || hasError ? null : message.pending ? "pending" : "sent";
+    // Into the text's last line when the text is the last thing in the
+    // bubble; letters end with their flight badge, errors with retry.
+    const metaInline = !!message.content && !isLetter && !hasError;
     const bubble = (
         <div
           className={`min-w-0 space-y-1 break-words rounded-2xl px-3 py-2 text-sm ${bubbleClass} ${
@@ -1294,8 +1423,12 @@ export function ChatRoom({
             )
           )}
           {message.content && (
-            <p className={`whitespace-pre-wrap ${isLetter ? "font-serif text-[15px] leading-relaxed" : ""}`}>
+            // flow-root: when the time doesn't fit into the last line it
+            // floats onto a line of its own, and must still count towards
+            // the paragraph's (and bubble's) height.
+            <p className={`flow-root whitespace-pre-wrap ${isLetter ? "font-serif text-[15px] leading-relaxed" : ""}`}>
               {message.content}
+              {metaInline && <MessageMeta at={at} status={metaStatus} inline />}
             </p>
           )}
           {hasError && (
@@ -1320,13 +1453,11 @@ export function ChatRoom({
           {isEncrypting && !isUploading ? (
             <span className="block font-mono text-[11px] opacity-70">🔐 Wird verschlüsselt…</span>
           ) : (
+            // A chat message on its way just shows 🕓 next to its time.
+            isLetter &&
             message.pending &&
             !hasError &&
-            !isUploading && (
-              <span className="text-xs opacity-70">
-                {isLetter ? "Brief wird übergeben…" : "Wird gesendet…"}
-              </span>
-            )
+            !isUploading && <span className="text-xs opacity-70">Brief wird übergeben…</span>
           )}
           {isLetter && !message.pending && !hasError && (
             <PigeonStatusBadge
@@ -1335,6 +1466,7 @@ export function ChatRoom({
               onOpen={() => setOpenFlightMessageId(message.id)}
             />
           )}
+          {!metaInline && <MessageMeta at={at} status={metaStatus} />}
         </div>
     );
 
@@ -1404,17 +1536,23 @@ export function ChatRoom({
               <p>Noch keine Nachrichten. Schreib {partnerName} — oder schick gleich eine Taube!</p>
             </div>
           )}
-          {timeline.map((item) => (
-            <div
-              key={item.key}
-              data-message-id={item.type === "message" ? item.message.id : undefined}
-              className={`-mx-2 rounded-2xl px-2 transition-colors duration-700 ${
-                enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : ""
-              } ${item.key === highlightedId ? "bg-[#c1643a]/15 dark:bg-night-accent/20" : ""}`}
-            >
-              {item.key === firstUnreadKey && <UnreadDivider />}
-              {item.type === "message" ? renderMessage(item.message) : renderIncoming(item.flight)}
-            </div>
+          {timeline.map((item, index) => (
+            <Fragment key={item.key}>
+              {/* Direct children of the scroll container, so each one
+                  stays stuck at the top for as long as its day is in view. */}
+              {(index === 0 || localDayStart(item.sortAt) !== localDayStart(timeline[index - 1].sortAt)) && (
+                <DayDivider label={dayLabel(item.sortAt, now)} />
+              )}
+              <div
+                data-message-id={item.type === "message" ? item.message.id : undefined}
+                className={`-mx-2 rounded-2xl px-2 transition-colors duration-700 ${
+                  enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : ""
+                } ${item.key === highlightedId ? "bg-[#c1643a]/15 dark:bg-night-accent/20" : ""}`}
+              >
+                {item.key === firstUnreadKey && <UnreadDivider />}
+                {item.type === "message" ? renderMessage(item.message, item.sortAt) : renderIncoming(item.flight)}
+              </div>
+            </Fragment>
           ))}
         </div>
         <NewMessagesButton count={unseenBelow} onClick={jumpToNewest} />
@@ -1571,22 +1709,47 @@ export function ChatRoom({
           {/* text-base (16px) on phones: anything smaller makes iOS Safari
               zoom the whole page in when the field gets focus. One
               textarea for both modes, so switching keeps focus and text. */}
-          <textarea
-            ref={composerRef}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={handleComposerKeyDown}
-            rows={isLetterMode ? 3 : 1}
-            enterKeyHint={isLetterMode ? "enter" : "send"}
-            aria-label={isLetterMode ? `Brief an ${partnerName}` : "Nachricht"}
-            placeholder={isLetterMode ? `Liebe/r ${partnerName}, …` : "Nachricht schreiben…"}
-            className={`min-w-0 flex-1 resize-none overflow-hidden border px-4 py-1.5 text-base leading-6 sm:text-sm sm:leading-6 ${
-              isLetterMode
-                ? "rounded-xl border-[#d8c9a3] font-serif dark:border-night-border"
-                : "rounded-[1.25rem] border-neutral-300 dark:border-night-border"
-            }`}
-          />
+          <div className="relative flex min-w-0 flex-1">
+            <textarea
+              ref={composerRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onPaste={handlePaste}
+              onKeyDown={handleComposerKeyDown}
+              onFocus={handleComposerFocus}
+              rows={isLetterMode ? 3 : 1}
+              enterKeyHint={isLetterMode ? "enter" : "send"}
+              aria-label={isLetterMode ? `Brief an ${partnerName}` : "Nachricht"}
+              placeholder={isLetterMode ? `Liebe/r ${partnerName}, …` : "Nachricht schreiben…"}
+              className={`min-w-0 flex-1 resize-none overflow-hidden border py-1.5 pl-10 pr-4 text-base leading-6 sm:text-sm sm:leading-6 ${
+                isLetterMode
+                  ? "rounded-xl border-[#d8c9a3] font-serif dark:border-night-border"
+                  : "rounded-[1.25rem] border-neutral-300 dark:border-night-border"
+              }`}
+            />
+            <button
+              type="button"
+              // Desktop: keeps the cursor where it is in the text field.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={toggleEmojiPanel}
+              aria-label={emojiOpen ? "Tastatur" : "Emojis"}
+              aria-expanded={emojiOpen}
+              title={emojiOpen ? "Tastatur" : "Emojis"}
+              className="absolute bottom-[3px] left-1 rounded-full p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
+            >
+              {emojiOpen ? (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+                  <rect x="2.5" y="6" width="19" height="12" rx="2" />
+                  <path strokeLinecap="round" d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M18 13.5h.01M9 14h6" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+                  <circle cx="12" cy="12" r="9" />
+                  <path strokeLinecap="round" d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01" />
+                </svg>
+              )}
+            </button>
+          </div>
           {hasSendableContent ? (
             <button
               type="submit"
@@ -1612,6 +1775,7 @@ export function ChatRoom({
             />
           )}
         </form>
+        {emojiOpen && <EmojiPicker onSelect={insertEmoji} onBackspace={deleteBeforeCursor} />}
       </div>
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={closeLightbox} />}
       {videoLightboxSrc && <VideoLightbox src={videoLightboxSrc} onClose={closeVideoLightbox} />}
