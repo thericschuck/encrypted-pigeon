@@ -3,7 +3,7 @@ import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { SetPasswordForm } from "./set-password-form";
 
 interface SetPasswordPageProps {
-  searchParams: { next?: string };
+  searchParams: Promise<{ next?: string }>;
 }
 
 // Only same-site paths — never bounce to another origin via ?next=.
@@ -17,6 +17,7 @@ function safeNext(next: string | undefined): string {
  * visit, a display name — so the password login works from now on.
  */
 export default async function SetPasswordPage({ searchParams }: SetPasswordPageProps) {
+  const { next } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login?error=auth_failed");
@@ -40,7 +41,7 @@ export default async function SetPasswordPage({ searchParams }: SetPasswordPageP
       <SetPasswordForm
         email={user.email}
         initialDisplayName={profile?.display_name ?? ""}
-        next={safeNext(searchParams.next)}
+        next={safeNext(next)}
       />
     </main>
   );

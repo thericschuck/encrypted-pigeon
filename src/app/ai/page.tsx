@@ -11,7 +11,7 @@ import { AiChat } from "@/components/ai/ai-chat";
 const SIGNED_URL_SECONDS = 60 * 60;
 
 interface AiPageProps {
-  searchParams: { c?: string };
+  searchParams: Promise<{ c?: string }>;
 }
 
 export default async function AiPage({ searchParams }: AiPageProps) {
@@ -26,7 +26,7 @@ export default async function AiPage({ searchParams }: AiPageProps) {
     notFound();
   }
 
-  const requestedId = searchParams.c ?? null;
+  const requestedId = (await searchParams).c ?? null;
   const [{ data: profile }, { data: conversations }, { data: messages }, { data: settings }, { data: memories }] =
     await Promise.all([
       supabase.from("profiles").select(MEMBER_PROFILE_COLUMNS).eq("id", user.id).maybeSingle(),

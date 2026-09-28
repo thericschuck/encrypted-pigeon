@@ -14,12 +14,13 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 interface LoginPageProps {
-  searchParams: { error?: string };
+  searchParams: Promise<{ error?: string }>;
 }
 
-export default function LoginPage({ searchParams }: LoginPageProps) {
-  const errorMessage = searchParams.error
-    ? (ERROR_MESSAGES[searchParams.error] ?? "Etwas ist schiefgelaufen. Bitte melde dich erneut an.")
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const { error } = await searchParams;
+  const errorMessage = error
+    ? (ERROR_MESSAGES[error] ?? "Etwas ist schiefgelaufen. Bitte melde dich erneut an.")
     : null;
 
   return (

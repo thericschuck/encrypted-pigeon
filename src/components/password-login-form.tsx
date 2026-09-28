@@ -2,7 +2,8 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   initialMagicLinkState,
   type MagicLinkState,
@@ -29,12 +30,12 @@ function SubmitButton() {
 }
 
 export function PasswordLoginForm({ action }: PasswordLoginFormProps) {
-  const [state, formAction] = useFormState(action, initialMagicLinkState);
+  const [state, formAction] = useActionState(action, initialMagicLinkState);
   const router = useRouter();
 
   // The action returns a "redirect" state instead of calling
   // next/navigation's redirect() itself — see the comment in
-  // src/app/login/actions.ts for why (a Next.js useFormState + redirect()
+  // src/app/login/actions.ts for why (a Next.js useActionState + redirect()
   // bug: https://github.com/vercel/next.js/issues/68549, which is exactly
   // what threw "Cannot read properties of undefined (reading 'status')"
   // here for non-admin logins).

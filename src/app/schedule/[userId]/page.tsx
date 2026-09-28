@@ -9,29 +9,30 @@ import { Avatar } from "@/components/ui/avatar";
 import { ScheduleView } from "@/components/schedule/schedule-view";
 
 interface SchedulePageProps {
-  params: { userId: string };
+  params: Promise<{ userId: string }>;
 }
 
 export default async function MemberSchedulePage({ params }: SchedulePageProps) {
+  const { userId } = await params;
   const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user) {
     redirect("/login");
   }
-  if (params.userId === user.id) {
+  if (userId === user.id) {
     redirect("/schedule");
   }
 
   const { data: profiles, error } = await supabase
     .from("profiles")
     .select(MEMBER_PROFILE_COLUMNS)
-    .in("id", [user.id, params.userId]);
+    .in("id", [user.id, userId]);
   // 22P02 = not even a uuid, a genuine 404.
   if (error && error.code !== "22P02") {
     throw new Error(`Wochenplan konnte nicht geladen werden: ${error.message}`);
   }
   const me = profiles?.find((p) => p.id === user.id) as MemberProfile | undefined;
-  const owner = profiles?.find((p) => p.id === params.userId) as MemberProfile | undefined;
+  const owner = profiles?.find((p) => p.id === userId) as MemberProfile | undefined;
   if (!me) {
     redirect("/");
   }

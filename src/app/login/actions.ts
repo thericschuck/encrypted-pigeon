@@ -92,7 +92,7 @@ export async function signInWithPassword(
 
   // Redirecting via client-side router.push() (see PasswordLoginForm)
   // instead of calling next/navigation's redirect() here works around a
-  // Next.js bug where a useFormState-bound action that redirects can leave
+  // Next.js bug where a useActionState-bound action that redirects can leave
   // `state` undefined on the next render:
   // https://github.com/vercel/next.js/issues/68549
   return { status: "redirect", message: "", redirectTo: "/" };

@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   initialMagicLinkState,
   type MagicLinkState,
@@ -41,7 +42,7 @@ export function MagicLinkForm({
   pendingLabel,
   placeholder,
 }: MagicLinkFormProps) {
-  const [state, formAction] = useFormState(action, initialMagicLinkState);
+  const [state, formAction] = useActionState(action, initialMagicLinkState);
 
   return (
     <form action={formAction} className="flex flex-col gap-3">

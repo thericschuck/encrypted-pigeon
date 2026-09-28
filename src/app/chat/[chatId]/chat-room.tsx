@@ -86,6 +86,8 @@ interface ChatRoomProps {
   initialHasOlder: boolean;
   /** Up to when I had read this chat before opening it ("Neue Nachrichten" line). */
   initialLastReadAt: string | null;
+  /** Up to when the partner has read this chat — ✓✓ on my messages up to there. */
+  initialPartnerLastReadAt: string | null;
   /** The partner's Wochenplan, if it's visible to me (busy hint above the composer). */
   partnerSchedule: Schedule | null;
 }
@@ -148,28 +150,55 @@ function DayDivider({ label }: { label: string }) {
   );
 }
 
+type MessageStatus = "pending" | "sent" | "read";
+
 /**
- * Time (and for my own messages: 🕓 on its way / ✓ sent) in the corner of
- * a bubble. `inline` floats it into the last line of the text, like
- * WhatsApp, instead of taking a line of its own.
+ * Time (and for my own messages: 🕓 on its way / ✓ sent / ✓✓ read) in the
+ * corner of a bubble. `inline` floats it into the last line of the text,
+ * like WhatsApp, instead of taking a line of its own. "read" is the only
+ * part at full strength — the one thing worth spotting at a glance.
  */
-function MessageMeta({ at, status, inline }: { at: number; status: "pending" | "sent" | null; inline?: boolean }) {
+function MessageMeta({
+  at,
+  status,
+  tone,
+  inline,
+}: {
+  at: number;
+  status: MessageStatus | null;
+  /** Own chat bubble (accent color) or letter (parchment): which blue reads. */
+  tone: "bubble" | "letter";
+  inline?: boolean;
+}) {
   return (
     <span
-      className={`flex select-none items-center gap-1 whitespace-nowrap font-sans text-[10px] leading-none opacity-60 ${
+      className={`flex select-none items-center gap-1 whitespace-nowrap font-sans text-[10px] leading-none ${
         inline ? "relative top-2 float-right ml-2" : "justify-end"
       }`}
     >
-      {timeFormat.format(at)}
+      <span className="opacity-60">{timeFormat.format(at)}</span>
       {status === "pending" && (
-        <svg aria-label="Wird gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-3 w-3">
+        <svg aria-label="Wird gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-3 w-3 opacity-60">
           <circle cx="8" cy="8" r="6" />
           <path strokeLinecap="round" d="M8 4.8V8l2 1.5" />
         </svg>
       )}
       {status === "sent" && (
-        <svg aria-label="Gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3 w-3">
+        <svg aria-label="Gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3 w-3 opacity-60">
           <path strokeLinecap="round" strokeLinejoin="round" d="m3 8.5 3 3 7-7" />
+        </svg>
+      )}
+      {status === "read" && (
+        <svg
+          aria-label="Gelesen"
+          viewBox="0 0 20 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          className={`h-3 w-[15px] ${tone === "letter" ? "text-sky-600 dark:text-sky-400" : "text-sky-200"}`}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m1.5 8.5 3 3 7-7" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m7 10 1.5 1.5 7-7" />
         </svg>
       )}
     </span>
@@ -239,12 +268,24 @@ export function ChatRoom({
   initialMessages,
   initialHasOlder,
   initialLastReadAt,
+  initialPartnerLastReadAt,
   partnerSchedule,
 }: ChatRoomProps) {
   const currentUserId = me.id;
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [flights, setFlights] = useState<Record<string, FlightRow>>({});
   const [flightsLoading, setFlightsLoading] = useState(true);
+  // The partner's last_read_at (ms): moves forward while they have this
+  // chat open (mark_chat_read), arrives live via their participant row.
+  const [partnerReadAt, setPartnerReadAt] = useState<number | null>(() =>
+    initialPartnerLastReadAt ? Date.parse(initialPartnerLastReadAt) : null
+  );
+  const notePartnerRead = useCallback((iso: string | null | undefined) => {
+    if (!iso) return;
+    const at = Date.parse(iso);
+    if (Number.isNaN(at)) return;
+    setPartnerReadAt((prev) => (prev === null || at > prev ? at : prev));
+  }, []);
   const [mode, setMode] = useState<MessageKind>("chat");
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
@@ -450,8 +491,15 @@ export function ChatRoom({
       return;
     }
     appendServerMessages(data ?? []);
+    const { data: partnerRow } = await supabase
+      .from("chat_participants")
+      .select("last_read_at")
+      .eq("chat_id", chatId)
+      .neq("user_id", currentUserId)
+      .maybeSingle();
+    notePartnerRead(partnerRow?.last_read_at);
     await fetchFlights();
-  }, [appendServerMessages, chatId, fetchFlights]);
+  }, [appendServerMessages, chatId, currentUserId, fetchFlights, notePartnerRead]);
 
   useEffect(() => {
     let cancelled = false;
@@ -631,6 +679,19 @@ export function ChatRoom({
             mergeFlights([payload.new as FlightRow]);
           }
         )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "pigeon",
+            table: "chat_participants",
+            filter: `chat_id=eq.${chatId}`,
+          },
+          (payload) => {
+            const row = payload.new as { user_id: string; last_read_at: string };
+            if (row.user_id !== currentUserId) notePartnerRead(row.last_read_at);
+          }
+        )
         .subscribe((status) => {
           // Every SUBSCRIBED catches up once: after a reconnect, anything
           // sent in between never reached us as an event — and the first
@@ -663,7 +724,7 @@ export function ChatRoom({
       window.removeEventListener("online", scheduleResync);
       if (channel) supabase.removeChannel(channel);
     };
-  }, [appendServerMessages, chatId, mergeFlights, resync]);
+  }, [appendServerMessages, chatId, currentUserId, mergeFlights, notePartnerRead, resync]);
 
   // Both buckets are private, so image_url/audio_url only ever hold a
   // storage path ("{chatId}/{messageId}.ext"). Resolve them to signed URLs
@@ -1269,7 +1330,16 @@ export function ChatRoom({
         : "bg-neutral-100 text-neutral-900 dark:bg-night-raised dark:text-night-text";
 
     const isEncrypting = message.id === encryptingId && !hasError;
-    const metaStatus = !isOwn || hasError ? null : message.pending ? "pending" : "sent";
+    // Read = the partner had this chat open after it reached them: a chat
+    // message once it exists, my letter only once it has landed.
+    const flight = flights[message.id];
+    const readableFrom = isLetter
+      ? flight?.status === "delivered"
+        ? flight.arrival_time
+        : null
+      : message.created_at;
+    const isRead = partnerReadAt !== null && !!readableFrom && Date.parse(readableFrom) <= partnerReadAt;
+    const metaStatus = !isOwn || hasError ? null : message.pending ? "pending" : isRead ? "read" : "sent";
     // Into the text's last line when the text is the last thing in the
     // bubble; letters end with their flight badge, errors with retry.
     const metaInline = !!message.content && !isLetter && !hasError;
@@ -1428,7 +1498,7 @@ export function ChatRoom({
             // the paragraph's (and bubble's) height.
             <p className={`flow-root whitespace-pre-wrap ${isLetter ? "font-serif text-[15px] leading-relaxed" : ""}`}>
               {message.content}
-              {metaInline && <MessageMeta at={at} status={metaStatus} inline />}
+              {metaInline && <MessageMeta at={at} status={metaStatus} tone={isLetter ? "letter" : "bubble"} inline />}
             </p>
           )}
           {hasError && (
@@ -1466,7 +1536,7 @@ export function ChatRoom({
               onOpen={() => setOpenFlightMessageId(message.id)}
             />
           )}
-          {!metaInline && <MessageMeta at={at} status={metaStatus} />}
+          {!metaInline && <MessageMeta at={at} status={metaStatus} tone={isLetter ? "letter" : "bubble"} />}
         </div>
     );
 

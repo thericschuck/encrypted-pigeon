@@ -11,10 +11,11 @@ import { HeaderScheduleStatus } from "@/components/schedule/schedule-status";
 import { ChatRoom } from "./chat-room";
 
 interface ChatPageProps {
-  params: { chatId: string };
+  params: Promise<{ chatId: string }>;
 }
 
 export default async function ChatPage({ params }: ChatPageProps) {
+  const { chatId } = await params;
   const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user) {
@@ -26,7 +27,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
   const { data: participants, error: participantsError } = await supabase
     .from("chat_participants")
     .select("user_id, last_read_at")
-    .eq("chat_id", params.chatId);
+    .eq("chat_id", chatId);
   // A failed query is not "no such chat": let error.tsx show it (with a
   // retry) instead of hiding e.g. a missing column behind a 404.
   // 22P02 = the id in the URL isn't even a valid uuid, a genuine 404.
@@ -41,6 +42,10 @@ export default async function ChatPage({ params }: ChatPageProps) {
 
   const otherUserId = participants.find((p) => p.user_id !== user.id)?.user_id;
   const myLastReadAt = participants.find((p) => p.user_id === user.id)?.last_read_at ?? null;
+  // For the ✓✓ on my messages (read receipts).
+  const partnerLastReadAt = otherUserId
+    ? (participants.find((p) => p.user_id === otherUserId)?.last_read_at ?? null)
+    : null;
 
   // RLS on messages already hides pigeon letters still in flight to me —
   // they show up as "incoming pigeon" placeholders (from the flight rows)
@@ -55,7 +60,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
     supabase
       .from("messages")
       .select("*")
-      .eq("chat_id", params.chatId)
+      .eq("chat_id", chatId)
       .order("created_at", { ascending: false })
       .limit(CHAT_PAGE_SIZE + 1),
   ]);
@@ -121,12 +126,13 @@ export default async function ChatPage({ params }: ChatPageProps) {
       </header>
       <div className="min-h-0 flex-1">
         <ChatRoom
-          chatId={params.chatId}
+          chatId={chatId}
           me={me}
           partner={partner}
           initialMessages={messages}
           initialHasOlder={hasOlderMessages}
           initialLastReadAt={myLastReadAt}
+          initialPartnerLastReadAt={partnerLastReadAt}
           partnerSchedule={partnerSchedule}
         />
       </div>

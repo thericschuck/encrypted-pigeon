@@ -51,7 +51,7 @@ async function closeChatNotifications(chatId: string) {
  */
 export function useChatReadState(chatId: string) {
   const accessTokenRef = useRef<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const markRead = useCallback(
     async (viewing: boolean) => {
