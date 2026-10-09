@@ -21,6 +21,9 @@ interface RequestBody {
 
 interface FlightEvent {
   type: string;
+  /** Stable variant id ("customs.1"); the app translates the label through it. */
+  key: string;
+  /** German fallback text (what flights created before `key` existed only have). */
   label: string;
   emoji: string;
   timestamp_offset_seconds: number;
@@ -109,6 +112,7 @@ Deno.serve(async (req: Request) => {
   const events: FlightEvent[] = chosen
     .map(({ template, impact }) => ({
       type: template.type,
+      key: template.key,
       label: template.label,
       emoji: template.emoji,
       timestamp_offset_seconds: Math.round(totalDurationSeconds * (0.05 + Math.random() * 0.8)),

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getT } from "@/lib/i18n/server";
 
 export type TestPushResult =
   | { status: "sent"; devices: number }
@@ -17,11 +18,12 @@ export type TestPushResult =
  * gate that makes sure people can only ever test their own devices.
  */
 export async function sendTestPush(): Promise<TestPushResult> {
+  const t = await getT();
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { status: "error", message: "Nicht angemeldet." };
+  if (!user) return { status: "error", message: t("system.push.notSignedIn") };
 
   let response: Response;
   try {
@@ -35,18 +37,18 @@ export async function sendTestPush(): Promise<TestPushResult> {
       cache: "no-store",
     });
   } catch {
-    return { status: "error", message: "Server nicht erreichbar." };
+    return { status: "error", message: t("system.push.unreachable") };
   }
 
   const result = (await response.json().catch(() => null)) as
     | { sent?: number; failed?: number; error?: string }
     | null;
   if (!response.ok || !result) {
-    return { status: "error", message: result?.error ?? `Fehler ${response.status}` };
+    return { status: "error", message: result?.error ?? t("system.push.httpError", { status: response.status }) };
   }
   if ((result.sent ?? 0) > 0) return { status: "sent", devices: result.sent ?? 0 };
   if ((result.failed ?? 0) > 0) {
-    return { status: "error", message: "Zustellung an deine Geräte fehlgeschlagen." };
+    return { status: "error", message: t("system.push.deliveryFailed") };
   }
   return { status: "no-devices" };
 }

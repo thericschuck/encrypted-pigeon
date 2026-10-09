@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { unsubscribeFromPush } from "@/lib/push/subscribe";
+import { useT } from "@/lib/i18n/client";
 
 /**
  * Removes this device's push subscription first (otherwise a signed-out
@@ -10,6 +11,7 @@ import { unsubscribeFromPush } from "@/lib/push/subscribe";
  * off to /auth/signout, which clears the session cookies server-side.
  */
 export function SignOutButton() {
+  const t = useT();
   const [busy, setBusy] = useState(false);
 
   async function handleSignOut() {
@@ -33,7 +35,7 @@ export function SignOutButton() {
       disabled={busy}
       className="w-full rounded-full border border-neutral-300 px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 dark:border-night-border dark:text-night-muted dark:hover:bg-night-raised"
     >
-      {busy ? "Wird abgemeldet…" : "Abmelden"}
+      {busy ? t("settings.signingOut") : t("settings.signOut")}
     </button>
   );
 }

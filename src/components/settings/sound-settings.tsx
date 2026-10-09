@@ -11,8 +11,10 @@ import {
 } from "@/lib/sound-settings";
 import { previewSound } from "@/lib/chat/chime-sounds";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
+import { useT } from "@/lib/i18n/client";
 
 export function SoundSettings() {
+  const t = useT();
   const settings = useSyncExternalStore(
     subscribeToSoundSettings,
     getSoundSettings,
@@ -27,15 +29,15 @@ export function SoundSettings() {
     <div className="rounded-xl border border-neutral-200 p-4 dark:border-night-border dark:bg-night-surface">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-night-text">Sounds</h2>
+          <h2 className="text-sm font-semibold text-neutral-900 dark:text-night-text">{t("settings.sounds.title")}</h2>
           <p className="mt-1 text-sm text-neutral-500 dark:text-night-muted">
-            Gilt nur für dieses Gerät.
+            {t("settings.sounds.deviceOnly")}
           </p>
         </div>
         <ToggleSwitch
           checked={settings.enabled}
           onChange={(on) => setSoundSettings({ ...settings, enabled: on })}
-          label="Alle Sounds"
+          label={t("settings.sounds.all")}
         />
       </div>
 
@@ -43,14 +45,14 @@ export function SoundSettings() {
         {SOUND_OPTIONS.map((option) => (
           <li key={option.key} className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-neutral-900 dark:text-night-text">{option.label}</p>
-              <p className="text-xs text-neutral-500 dark:text-night-muted">{option.description}</p>
+              <p className="text-sm text-neutral-900 dark:text-night-text">{t(option.labelKey)}</p>
+              <p className="text-xs text-neutral-500 dark:text-night-muted">{t(option.descriptionKey)}</p>
             </div>
             <button
               type="button"
               onClick={() => previewSound(option.key)}
-              aria-label={`${option.label} anhören`}
-              title="Anhören"
+              aria-label={t("settings.sounds.previewNamed", { label: t(option.labelKey) })}
+              title={t("settings.sounds.preview")}
               className="flex-shrink-0 rounded-full p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
@@ -60,7 +62,7 @@ export function SoundSettings() {
             <ToggleSwitch
               checked={settings.sounds[option.key]}
               onChange={(on) => setSound(option.key, on)}
-              label={option.label}
+              label={t(option.labelKey)}
               disabled={!settings.enabled}
             />
           </li>

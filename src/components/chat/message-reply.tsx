@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useT } from "@/lib/i18n/client";
 
 // How far (px) a bubble has to be dragged to the right to start a reply,
 // and the most it follows the finger.
@@ -62,6 +63,7 @@ export function ReplyComposerPreview({
   preview: string;
   onCancel: () => void;
 }) {
+  const t = useT();
   return (
     <div className="animate-fade-in mb-2 flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-night-border dark:bg-night-surface">
       <div className="min-w-0 flex-1 border-l-[3px] border-[#c1643a] pl-2 dark:border-night-accent">
@@ -71,7 +73,7 @@ export function ReplyComposerPreview({
       <button
         type="button"
         onClick={onCancel}
-        aria-label="Antworten abbrechen"
+        aria-label={t("chatMisc.reply.cancel")}
         className="flex-shrink-0 rounded-full p-1 text-neutral-500 hover:bg-neutral-200 dark:text-night-muted dark:hover:bg-night-raised"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
@@ -108,6 +110,7 @@ export function ReplyableRow({
   onReply: () => void;
   children: ReactNode;
 }) {
+  const t = useT();
   const [offset, setOffset] = useState(0);
   const gesture = useRef<{ id: number; x: number; y: number; swiping: boolean; armed: boolean } | null>(null);
 
@@ -179,8 +182,8 @@ export function ReplyableRow({
         <button
           type="button"
           onClick={onReply}
-          aria-label="Antworten"
-          title="Antworten"
+          aria-label={t("chatMisc.reply.reply")}
+          title={t("chatMisc.reply.reply")}
           className="hidden flex-shrink-0 rounded-full p-1.5 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-600 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:block dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
         >
           <ReplyIcon className="h-4 w-4" />

@@ -7,6 +7,10 @@ import { AuthHashForwarder } from "@/components/auth/auth-hash-forwarder";
 import { OutboxResumer } from "@/components/chat/outbox-resumer";
 import { THEME_COOKIE, parseTheme, themeClass } from "@/lib/theme";
 import { ACCENT_COOKIE, accentStyle, parseAccent } from "@/lib/accent";
+import { I18nProvider } from "@/lib/i18n/client";
+import { INTL_LOCALES } from "@/lib/i18n/config";
+import { MESSAGES } from "@/lib/i18n/messages";
+import { getLocale, getT } from "@/lib/i18n/server";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -24,45 +28,50 @@ const geistMono = localFont({
 // in production (set it to https://encrypted-pigeon.com in Vercel).
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
-  title: "Encrypted Pigeon",
-  description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
-  manifest: "/manifest.json",
-  icons: {
-    icon: [
-      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
-    ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-  },
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Pigeon",
-  },
-  openGraph: {
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  const locale = await getLocale();
+  const description = t("common.appDescription");
+  return {
+    metadataBase: new URL(siteUrl),
     title: "Encrypted Pigeon",
-    description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
-    url: "/",
-    siteName: "Encrypted Pigeon",
-    images: [{ url: "/icons/icon-512.png", width: 512, height: 512 }],
-    locale: "de_DE",
-    type: "website",
-  },
-  twitter: {
-    card: "summary",
-    title: "Encrypted Pigeon",
-    description: "Verschlüsselte Nachrichten, zugestellt per Taubenpost.",
-    images: ["/icons/icon-512.png"],
-  },
-  robots: {
-    // Private messenger, not a marketing site — keep it out of search results.
-    index: false,
-    follow: false,
-  },
-};
+    description,
+    manifest: "/manifest.json",
+    icons: {
+      icon: [
+        { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    },
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: "default",
+      title: "Pigeon",
+    },
+    openGraph: {
+      title: "Encrypted Pigeon",
+      description,
+      url: "/",
+      siteName: "Encrypted Pigeon",
+      images: [{ url: "/icons/icon-512.png", width: 512, height: 512 }],
+      locale: INTL_LOCALES[locale].replace("-", "_"),
+      type: "website",
+    },
+    twitter: {
+      card: "summary",
+      title: "Encrypted Pigeon",
+      description,
+      images: ["/icons/icon-512.png"],
+    },
+    robots: {
+      // Private messenger, not a marketing site — keep it out of search results.
+      index: false,
+      follow: false,
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: [
@@ -85,11 +94,12 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const theme = parseTheme(cookieStore.get(THEME_COOKIE)?.value);
   const accent = parseAccent(cookieStore.get(ACCENT_COOKIE)?.value);
+  const locale = await getLocale();
 
   return (
     // suppressHydrationWarning: <ThemeSync /> may adjust class/style client-side.
     <html
-      lang="de"
+      lang={locale}
       className={themeClass(theme) || undefined}
       style={accentStyle(accent)}
       suppressHydrationWarning
@@ -97,10 +107,12 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthHashForwarder />
-        <OutboxResumer />
-        {children}
-        <PwaInstallPrompt />
+        <I18nProvider locale={locale} messages={MESSAGES[locale]}>
+          <AuthHashForwarder />
+          <OutboxResumer />
+          {children}
+          <PwaInstallPrompt />
+        </I18nProvider>
       </body>
     </html>
   );

@@ -4,20 +4,26 @@ import { createClient } from "@/lib/supabase/server";
 import { ensureMembership } from "@/lib/auth/bootstrap";
 import { authCallbackUrl } from "@/lib/site-url";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
-import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
-
-const NOT_INVITED_MESSAGE =
-  "Für diese E-Mail gibt es keine Einladung. Frag die Person, die Encrypted Pigeon betreibt.";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { setAuthUserLanguage } from "@/lib/auth/user-language";
+import { getLocale, getT } from "@/lib/i18n/server";
+import { isNetworkError } from "@/lib/supabase/resilient-fetch";
 
 export async function sendMagicLink(
   _prevState: MagicLinkState,
   formData: FormData
 ): Promise<MagicLinkState> {
+  const t = await getT();
   const email = String(formData.get("email") ?? "").trim();
 
   if (!email) {
-    return { status: "error", message: "Bitte eine E-Mail-Adresse eingeben." };
+    return { status: "error", message: t("auth.emailRequired") };
   }
+
+  // GoTrue ignores `data` for existing users, so put the language of this
+  // request into user_metadata ourselves — the email template reads it.
+  // Best effort (never throws); doesn't reveal whether the account exists.
+  await setAuthUserLanguage(createAdminClient(), email, await getLocale());
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
@@ -31,17 +37,17 @@ export async function sendMagicLink(
   });
 
   if (error) {
-    if (isNetworkError(error)) return { status: "error", message: NETWORK_ERROR_MESSAGE };
+    if (isNetworkError(error)) return { status: "error", message: t("common.networkError") };
     // GoTrue's wording for "no such user" with shouldCreateUser: false.
     if (/signups not allowed|user not found/i.test(error.message)) {
-      return { status: "error", message: NOT_INVITED_MESSAGE };
+      return { status: "error", message: t("auth.notInvited") };
     }
     return { status: "error", message: error.message };
   }
 
   return {
     status: "sent",
-    message: `Magic Link an ${email} verschickt. Bitte E-Mails prüfen.`,
+    message: t("auth.magicLinkSent", { email }),
   };
 }
 
@@ -49,11 +55,12 @@ export async function signInWithPassword(
   _prevState: MagicLinkState,
   formData: FormData
 ): Promise<MagicLinkState> {
+  const t = await getT();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
-    return { status: "error", message: "E-Mail und Passwort erforderlich." };
+    return { status: "error", message: t("auth.emailPasswordRequired") };
   }
 
   const supabase = await createClient();
@@ -63,13 +70,13 @@ export async function signInWithPassword(
   });
 
   if (error && isNetworkError(error)) {
-    return { status: "error", message: NETWORK_ERROR_MESSAGE };
+    return { status: "error", message: t("common.networkError") };
   }
 
   if (error || !data.user?.email) {
     return {
       status: "error",
-      message: error?.message ?? "Anmeldung fehlgeschlagen.",
+      message: error?.message ?? t("auth.loginFailed"),
     };
   }
 
@@ -81,13 +88,13 @@ export async function signInWithPassword(
     return {
       status: "error",
       message: isNetworkError(bootstrapError)
-        ? NETWORK_ERROR_MESSAGE
-        : "Anmeldung fehlgeschlagen. Bitte nochmal versuchen.",
+        ? t("common.networkError")
+        : t("auth.loginFailedRetry"),
     };
   }
   if (membership.status === "not_invited") {
     await supabase.auth.signOut();
-    return { status: "error", message: NOT_INVITED_MESSAGE };
+    return { status: "error", message: t("auth.notInvited") };
   }
 
   // Redirecting via client-side router.push() (see PasswordLoginForm)

@@ -8,6 +8,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { CHAT_PAGE_SIZE } from "@/lib/chat/pagination";
 import { loadSchedules } from "@/lib/schedule/schedule";
 import { HeaderScheduleStatus } from "@/components/schedule/schedule-status";
+import { getT } from "@/lib/i18n/server";
 import { ChatRoom } from "./chat-room";
 
 interface ChatPageProps {
@@ -16,6 +17,7 @@ interface ChatPageProps {
 
 export default async function ChatPage({ params }: ChatPageProps) {
   const { chatId } = await params;
+  const t = await getT();
   const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
 
   if (!user) {
@@ -32,7 +34,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
   // retry) instead of hiding e.g. a missing column behind a 404.
   // 22P02 = the id in the URL isn't even a valid uuid, a genuine 404.
   if (participantsError && participantsError.code !== "22P02") {
-    throw new Error(`Chat konnte nicht geladen werden: ${participantsError.message}`);
+    throw new Error(t("chatMisc.page.loadError", { message: participantsError.message }));
   }
 
   const isParticipant = participants?.some((p) => p.user_id === user.id);
@@ -83,13 +85,13 @@ export default async function ChatPage({ params }: ChatPageProps) {
     // behind the collapsing URL bar, which pushed the composer off-screen.
     <main className="flex h-[100dvh] flex-col">
       <SessionWatcher />
-      <ThemeSync theme={me.theme} accent={me.accent_color} />
+      <ThemeSync theme={me.theme} accent={me.accent_color} language={me.language} />
       <header className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-night-border">
         <div className="flex min-w-0 items-center gap-2.5">
           {/* From md up the chat list is always visible as a sidebar. */}
           <Link
             href="/"
-            aria-label="Zurück zu deinen Chats"
+            aria-label={t("chatMisc.page.backToChats")}
             className="flex-shrink-0 text-neutral-400 hover:text-neutral-600 md:hidden dark:text-night-muted dark:hover:text-night-text"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -104,7 +106,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
         </div>
         <Link
           href="/settings"
-          aria-label="Einstellungen"
+          aria-label={t("chatMisc.page.settings")}
           className="flex-shrink-0 text-neutral-400 hover:text-neutral-600 dark:text-night-muted dark:hover:text-night-text"
         >
           <svg

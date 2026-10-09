@@ -8,12 +8,16 @@ import {
   type HistoryPage,
   type TranslationEntry,
 } from "@/app/translate/actions";
+import { useLocale, useT } from "@/lib/i18n/client";
+import { intlLocale } from "@/lib/i18n/config";
 import { TranslationHistory } from "@/components/translate/translation-history";
 import type { Usage } from "@/lib/translate/deepl";
 import {
   MAX_TRANSLATE_CHARS,
   SOURCE_LANGUAGES,
   TARGET_LANGUAGES,
+  defaultTarget,
+  languageLabelKey,
   isSourceLanguage,
   isTargetLanguage,
   sourceFor,
@@ -35,11 +39,14 @@ export function Translator({
   initialUsage: Usage | null;
   initialHistory: HistoryPage;
 }) {
-  const [source, setSource] = useState<SourceLanguage>("DE");
-  const [target, setTarget] = useState<TargetLanguage>("ZH-HANS");
+  const t = useT();
+  const locale = useLocale();
+  const numberTag = intlLocale(locale);
+  const [source, setSource] = useState<SourceLanguage>("auto");
+  const [target, setTarget] = useState<TargetLanguage>(() => defaultTarget(locale));
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  // DeepL's answer to "Automatisch erkennen", shown under the input.
+  // DeepL's answer to "detect automatically", shown under the input.
   const [detected, setDetected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState(initialUsage);
@@ -126,7 +133,7 @@ export function Translator({
       setHistory((prev) =>
         [entry, ...prev].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
       );
-      setError("Eintrag konnte nicht gelöscht werden.");
+      setError(t("translate.deleteFailed"));
     }
   }
 
@@ -145,9 +152,12 @@ export function Translator({
   // ⇄ like on DeepL: languages switch sides and the translation becomes
   // the new input.
   function swap() {
-    const resolvedSource = source === "auto" ? (detected === "DE" ? "DE" : detected ? "ZH" : null) : source;
-    setSource(sourceFor(target));
-    setTarget(targetFor(resolvedSource ?? (target === "DE" ? "ZH" : "DE")));
+    const detectedBase = detected?.toUpperCase().split("-")[0] ?? "";
+    const resolvedSource =
+      source !== "auto" ? source : isSourceLanguage(detectedBase) && detectedBase !== "auto" ? detectedBase : null;
+    const newSource = sourceFor(target);
+    setSource(newSource);
+    setTarget(targetFor(resolvedSource ?? (newSource === "DE" ? "EN" : "DE")));
     if (output) {
       setInput(output);
       setOutput("");
@@ -162,11 +172,12 @@ export function Translator({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      setError("Kopieren hat nicht geklappt — bitte Text markieren und manuell kopieren.");
+      setError(t("translate.copyFailed"));
     }
   }
 
-  const detectedLabel = detected ? (SOURCE_LANGUAGES.find((l) => l.code === detected)?.label ?? detected) : null;
+  const detectedKey = detected ? languageLabelKey(detected) : null;
+  const detectedLabel = detected ? (detectedKey ? t(detectedKey) : detected) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -175,20 +186,20 @@ export function Translator({
           <select
             value={source}
             onChange={(event) => isSourceLanguage(event.target.value) && setSource(event.target.value)}
-            aria-label="Ausgangssprache"
+            aria-label={t("translate.sourceLanguage")}
             className={SELECT_CLASS}
           >
             {SOURCE_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
-                {l.label}
+                {t(l.labelKey)}
               </option>
             ))}
           </select>
           <button
             type="button"
             onClick={swap}
-            aria-label="Sprachen tauschen"
-            title="Sprachen tauschen"
+            aria-label={t("translate.swap")}
+            title={t("translate.swap")}
             className="flex-shrink-0 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -198,12 +209,12 @@ export function Translator({
           <select
             value={target}
             onChange={(event) => isTargetLanguage(event.target.value) && setTarget(event.target.value)}
-            aria-label="Zielsprache"
+            aria-label={t("translate.targetLanguage")}
             className={SELECT_CLASS}
           >
             {TARGET_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
-                {l.label}
+                {t(l.labelKey)}
               </option>
             ))}
           </select>
@@ -220,14 +231,14 @@ export function Translator({
               onKeyDown={handleKeyDown}
               rows={8}
               autoFocus
-              aria-label="Text zum Übersetzen"
-              placeholder="Text eingeben…"
+              aria-label={t("translate.inputLabel")}
+              placeholder={t("translate.inputPlaceholder")}
               className="min-h-40 w-full resize-y rounded-2xl border border-neutral-300 px-4 py-3 text-base leading-6 sm:text-sm sm:leading-6 dark:border-night-border"
             />
             <div className="flex items-center justify-between gap-2 px-1 text-xs text-neutral-400 dark:text-night-muted">
-              <span>{detectedLabel ? `Erkannt: ${detectedLabel}` : "Strg/⌘ + Enter übersetzt"}</span>
+              <span>{detectedLabel ? t("translate.detected", { language: detectedLabel }) : t("translate.shortcutHint")}</span>
               <span className={`tabular-nums ${tooLong ? "font-medium text-red-500" : ""}`}>
-                {input.length.toLocaleString("de-DE")} / {MAX_TRANSLATE_CHARS.toLocaleString("de-DE")}
+                {input.length.toLocaleString(numberTag)} / {MAX_TRANSLATE_CHARS.toLocaleString(numberTag)}
               </span>
             </div>
           </div>
@@ -239,19 +250,19 @@ export function Translator({
                 pending ? "opacity-50" : ""
               } ${output ? "" : "text-neutral-400 dark:text-night-muted"}`}
             >
-              {output || (pending ? "Wird übersetzt…" : "Übersetzung")}
+              {output || (pending ? t("translate.translating") : t("translate.outputPlaceholder"))}
             </div>
             {output && (
               <div className="flex items-center justify-between gap-2 px-2 pb-2">
                 <span className="px-2 text-[11px] text-neutral-400 dark:text-night-muted">
-                  {fromHistory ? "Aus dem Verlauf – keine Credits verbraucht" : ""}
+                  {fromHistory ? t("translate.fromHistory") : ""}
                 </span>
                 <button
                   type="button"
                   onClick={copyOutput}
                   className="rounded-full px-3 py-1 text-xs text-neutral-500 hover:bg-neutral-200 dark:text-night-muted dark:hover:bg-night-raised"
                 >
-                  {copied ? "✓ Kopiert" : "Kopieren"}
+                  {copied ? t("translate.copied") : t("translate.copy")}
                 </button>
               </div>
             )}
@@ -267,15 +278,15 @@ export function Translator({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs text-neutral-400 dark:text-night-muted">
             {usage
-              ? `DeepL: ${usage.used.toLocaleString("de-DE")} von ${usage.limit.toLocaleString("de-DE")} Zeichen diesen Monat`
-              : "Übersetzt mit DeepL"}
+              ? t("translate.usage", { used: usage.used.toLocaleString(numberTag), limit: usage.limit.toLocaleString(numberTag) })
+              : t("translate.poweredBy")}
           </span>
           <button
             type="submit"
             disabled={!canTranslate}
             className="rounded-full bg-accent px-5 py-2 text-sm text-on-accent disabled:opacity-50"
           >
-            {pending ? "Wird übersetzt…" : "Übersetzen"}
+            {pending ? t("translate.translating") : t("translate.submit")}
           </button>
         </div>
       </form>

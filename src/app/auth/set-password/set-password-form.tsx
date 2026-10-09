@@ -3,7 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
+import { isNetworkError } from "@/lib/supabase/resilient-fetch";
+import { useT } from "@/lib/i18n/client";
+import type { TFunction } from "@/lib/i18n/translate";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -14,15 +16,15 @@ interface SetPasswordFormProps {
   next: string;
 }
 
-function passwordErrorMessage(error: { message: string; code?: string }): string {
-  if (isNetworkError(error)) return NETWORK_ERROR_MESSAGE;
+function passwordErrorMessage(t: TFunction, error: { message: string; code?: string }): string {
+  if (isNetworkError(error)) return t("common.networkError");
   if (error.code === "same_password") {
-    return "Das ist schon dein aktuelles Passwort. Wähle ein anderes.";
+    return t("auth.setPassword.samePassword");
   }
   if (error.code === "weak_password") {
-    return "Das Passwort ist zu schwach. Nimm ein längeres oder eines mit mehr Abwechslung.";
+    return t("auth.setPassword.weakPassword");
   }
-  return `Passwort konnte nicht gespeichert werden: ${error.message}`;
+  return t("auth.setPassword.saveFailedWith", { message: error.message });
 }
 
 /**
@@ -32,6 +34,7 @@ function passwordErrorMessage(error: { message: string; code?: string }): string
  */
 export function SetPasswordForm({ email, initialDisplayName, next }: SetPasswordFormProps) {
   const router = useRouter();
+  const t = useT();
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -43,11 +46,11 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
     setError(null);
 
     if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Das Passwort braucht mindestens ${MIN_PASSWORD_LENGTH} Zeichen.`);
+      setError(t("auth.setPassword.tooShort", { min: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (password !== confirmation) {
-      setError("Die beiden Passwörter stimmen nicht überein.");
+      setError(t("auth.setPassword.mismatch"));
       return;
     }
 
@@ -55,7 +58,7 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
     const supabase = createClient();
     const { data, error: passwordError } = await supabase.auth.updateUser({ password });
     if (passwordError || !data.user) {
-      setError(passwordError ? passwordErrorMessage(passwordError) : "Passwort konnte nicht gespeichert werden.");
+      setError(passwordError ? passwordErrorMessage(t, passwordError) : t("auth.setPassword.saveFailed"));
       setPending(false);
       return;
     }
@@ -78,7 +81,7 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       {email && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-500 dark:text-night-muted">E-Mail (zum Anmelden)</span>
+          <span className="text-neutral-500 dark:text-night-muted">{t("auth.setPassword.emailLabel")}</span>
           <input
             type="email"
             value={email}
@@ -89,18 +92,18 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
         </label>
       )}
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-500 dark:text-night-muted">Dein Name</span>
+        <span className="text-neutral-500 dark:text-night-muted">{t("auth.setPassword.nameLabel")}</span>
         <input
           type="text"
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
           autoComplete="nickname"
-          placeholder="Wie sollen dich die anderen sehen?"
+          placeholder={t("auth.setPassword.namePlaceholder")}
           className="rounded border border-neutral-300 px-3 py-2 text-base sm:text-sm dark:border-night-border"
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-500 dark:text-night-muted">Passwort</span>
+        <span className="text-neutral-500 dark:text-night-muted">{t("auth.setPassword.passwordLabel")}</span>
         <input
           type="password"
           value={password}
@@ -108,12 +111,12 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
           required
           minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
-          placeholder={`Mindestens ${MIN_PASSWORD_LENGTH} Zeichen`}
+          placeholder={t("auth.setPassword.passwordPlaceholder", { min: MIN_PASSWORD_LENGTH })}
           className="rounded border border-neutral-300 px-3 py-2 text-base sm:text-sm dark:border-night-border"
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-500 dark:text-night-muted">Passwort wiederholen</span>
+        <span className="text-neutral-500 dark:text-night-muted">{t("auth.setPassword.repeatLabel")}</span>
         <input
           type="password"
           value={confirmation}
@@ -128,7 +131,7 @@ export function SetPasswordForm({ email, initialDisplayName, next }: SetPassword
         disabled={pending}
         className="rounded bg-accent px-3 py-2 text-on-accent disabled:opacity-50"
       >
-        {pending ? "Wird gespeichert..." : "Speichern und loslegen"}
+        {pending ? t("auth.setPassword.saving") : t("auth.setPassword.submit")}
       </button>
       {error && (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">

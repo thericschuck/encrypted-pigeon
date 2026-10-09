@@ -7,6 +7,7 @@ import { loadChatOverview, type ChatListItem } from "@/lib/chat/chat-overview";
 import { recallChatList } from "@/lib/chat/chat-list-store";
 import type { MemberProfile } from "@/lib/profile";
 import { LiveChatList } from "@/components/dashboard/live-chat-list";
+import { useT } from "@/lib/i18n/client";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Same breakpoint as the sidebar's `md:flex` in app/chat/layout.tsx.
@@ -37,6 +38,7 @@ export function ChatSidebar({ userId }: ChatSidebarProps) {
   const [visible, setVisible] = useState(false);
   const [list, setList] = useState<SidebarList | null>(null);
   const pathname = usePathname();
+  const t = useT();
   // Chat ids already reloaded for — at most once each, so an id that's
   // still missing afterwards (bad link) can't cause a reload loop.
   const reloadedForRef = useRef(new Set<string>());
@@ -50,9 +52,9 @@ export function ChatSidebar({ userId }: ChatSidebarProps) {
   }, []);
 
   const reload = useCallback(async () => {
-    const overview = await loadChatOverview(createClient(), userId);
+    const overview = await loadChatOverview(createClient(), userId, t);
     setList({ chats: overview.chats, membersWithoutChat: overview.membersWithoutChat });
-  }, [userId]);
+  }, [userId, t]);
 
   useEffect(() => {
     if (!visible || list) return;
@@ -75,7 +77,7 @@ export function ChatSidebar({ userId }: ChatSidebarProps) {
 
   if (!list) {
     return (
-      <div className="flex flex-col gap-2 px-3 pt-6" aria-label="Chats werden geladen">
+      <div className="flex flex-col gap-2 px-3 pt-6" aria-label={t("dashboard.chatsLoading")}>
         {Array.from({ length: 4 }, (_, index) => (
           <div key={index} className="flex items-center gap-3 py-1.5">
             <Skeleton className="h-10 w-10 flex-shrink-0 rounded-full" />

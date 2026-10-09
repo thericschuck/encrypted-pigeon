@@ -1,11 +1,13 @@
 import {
-  AVAILABILITY_INFO,
+  availabilityLabel,
   blockTitle,
   blocksStartingOn,
   describeStatus,
   statusAt,
   type Schedule,
 } from "@/lib/schedule/schedule";
+import { intlLocale, type Locale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
 import { formatMinute, zonedParts } from "@/lib/schedule/time";
 
 interface PromptInput {
@@ -16,11 +18,23 @@ interface PromptInput {
   instructions: string;
   /** Facts the owner saved about themselves, editable in /ai. */
   memories: string[];
+  /** The user's UI language: the assistant answers in it. */
+  locale: Locale;
+  /** Translator for `locale` (schedule labels in the prompt). */
+  t: TFunction;
   now?: Date;
 }
 
-function formatNow(now: Date, timeZone: string) {
-  return new Intl.DateTimeFormat("de-DE", {
+// English names, so the model is unambiguous whatever the prompt language.
+const REPLY_LANGUAGE: Record<Locale, string> = {
+  de: "German (Deutsch)",
+  en: "English",
+  fr: "French (français)",
+  zh: "Simplified Chinese (简体中文)",
+};
+
+function formatNow(now: Date, timeZone: string, locale: Locale) {
+  return new Intl.DateTimeFormat(intlLocale(locale), {
     timeZone,
     weekday: "long",
     day: "2-digit",
@@ -37,10 +51,10 @@ function formatNow(now: Date, timeZone: string) {
  * ich heute frei?" or "was ist das?" (photo from a shop in Dengfeng) get
  * answers that fit.
  */
-export function buildSystemPrompt({ name, timezone, schedule, instructions, memories, now = new Date() }: PromptInput): string {
+export function buildSystemPrompt({ name, timezone, schedule, instructions, memories, locale, t, now = new Date() }: PromptInput): string {
   const lines = [
     `Du bist der persönliche KI-Assistent von ${name} in der privaten App „Encrypted Pigeon“.`,
-    "Antworte auf Deutsch, außer du wirst in einer anderen Sprache angesprochen. Sei präzise, ehrlich und hilfreich, komm schnell auf den Punkt und nutze Markdown (Listen, **fett**, Tabellen, Code) nur, wo es die Antwort klarer macht.",
+    `Antworte standardmäßig auf ${REPLY_LANGUAGE[locale]}: Das ist die Sprache der App-Oberfläche von ${name}. Wechsle die Sprache nur, wenn ${name} dich ausdrücklich darum bittet oder eine Übersetzung verlangt. Sei präzise, ehrlich und hilfreich, komm schnell auf den Punkt und nutze Markdown (Listen, **fett**, Tabellen, Code) nur, wo es die Antwort klarer macht.`,
     "Wenn du etwas nicht sicher weißt, sag das offen, statt zu raten. Du hast keinen Internetzugang: Bei aktuellen Ereignissen, Preisen, Öffnungszeiten, Wetter oder Fahrplänen weise darauf hin, dass dein Wissen veraltet sein kann.",
     "Bei Fotos (z.B. Produkte, Verpackungen, Schilder, Speisekarten, Medikamente): lies chinesischen Text vollständig ab, übersetze ihn, erkläre was es ist und wofür man es benutzt, und nenne Warnhinweise. Gib bei Medikamenten und Inhaltsstoffen an, wenn du dir nicht sicher bist.",
   ];
@@ -63,10 +77,10 @@ export function buildSystemPrompt({ name, timezone, schedule, instructions, memo
     "Gedächtnis: Wenn dir der Nutzer in diesem Gespräch etwas Dauerhaftes über sich erzählt, das künftige Antworten verbessert (Wohnort, Tätigkeit, Vorlieben, Allergien, Ziele …) und das oben noch nicht steht, schreib ganz am Ende deiner Antwort eine eigene Zeile im Format [[merken: kurzer Fakt in der Ich-Form]]. Höchstens eine solche Zeile pro Antwort, nur bei wirklich neuen, dauerhaften Fakten, nie für Belangloses. Der Nutzer entscheidet selbst, ob es gespeichert wird.",
     "",
     "Kontext:",
-    `- Datum und Uhrzeit bei ${name}: ${formatNow(now, timezone)} (Zeitzone ${timezone})`
+    `- Datum und Uhrzeit bei ${name}: ${formatNow(now, timezone, locale)} (Zeitzone ${timezone})`
   );
   if (timezone !== "Europe/Berlin") {
-    lines.push(`- In Deutschland ist es gerade: ${formatNow(now, "Europe/Berlin")}`);
+    lines.push(`- In Deutschland ist es gerade: ${formatNow(now, "Europe/Berlin", locale)}`);
   }
 
   if (schedule) {
@@ -76,21 +90,21 @@ export function buildSystemPrompt({ name, timezone, schedule, instructions, memo
       lines.push(`- ${name}s Wochenplan heute (Zeiten in ${schedule.timezone}):`);
       for (const block of blocks) {
         lines.push(
-          `  - ${formatMinute(block.start_minute)}–${formatMinute(block.end_minute)} ${blockTitle(block)} (${AVAILABILITY_INFO[block.availability].label})`
+          `  - ${formatMinute(block.start_minute)}–${formatMinute(block.end_minute)} ${blockTitle(block, t)} (${availabilityLabel(t, block.availability)})`
         );
       }
     }
     const status = statusAt(schedule, now);
-    if (status) lines.push(`- Gerade laut Plan: ${describeStatus(status, now, schedule.timezone)}`);
+    if (status) lines.push(`- Gerade laut Plan: ${describeStatus(status, now, schedule.timezone, t, locale)}`);
   }
 
   return lines.join("\n");
 }
 
 /** A short conversation title from the first question. */
-export function titleFrom(question: string, hasImages = false): string {
+export function titleFrom(question: string, hasImages: boolean, t: TFunction): string {
   const oneLine = question.replace(/\s+/g, " ").trim();
-  if (!oneLine) return hasImages ? "📷 Foto" : "Neue Unterhaltung";
+  if (!oneLine) return hasImages ? `📷 ${t("ai.photoTitle")}` : t("ai.untitled");
   const title = oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
   return hasImages ? `📷 ${title}` : title;
 }

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
+import type { TFunction } from "@/lib/i18n/translate";
 
 type PigeonClient = SupabaseClient<Database, "pigeon">;
 
@@ -43,14 +44,15 @@ export function isPushSupported(): boolean {
  */
 export async function requestPushPermissionAndSubscribe(
   supabase: PigeonClient,
-  userId: string
+  userId: string,
+  t: TFunction
 ): Promise<NotificationPermission> {
   if (!isPushSupported()) return "denied";
 
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return permission;
 
-  const result = await subscribeToPush(supabase, userId);
+  const result = await subscribeToPush(supabase, userId, t);
   if (!result.ok) console.error("Push subscription failed:", result.reason);
   return permission;
 }
@@ -74,22 +76,23 @@ async function readyRegistration(): Promise<ServiceWorkerRegistration | null> {
  * settings can show — a silent failure here looks exactly like "push is
  * on" in the browser while the server has nowhere to send to.
  */
-export async function subscribeToPush(supabase: PigeonClient, userId: string): Promise<SubscribeResult> {
+export async function subscribeToPush(
+  supabase: PigeonClient,
+  userId: string,
+  t: TFunction
+): Promise<SubscribeResult> {
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!publicKey) {
-    return {
-      ok: false,
-      reason: "Push ist in dieser App-Version nicht eingerichtet (NEXT_PUBLIC_VAPID_PUBLIC_KEY fehlt beim Build).",
-    };
+    return { ok: false, reason: t("settings.subscribe.noVapid") };
   }
-  if (!isPushSupported()) return { ok: false, reason: "Dieser Browser unterstützt keine Push-Benachrichtigungen." };
+  if (!isPushSupported()) return { ok: false, reason: t("settings.subscribe.unsupported") };
   if (Notification.permission !== "granted") {
-    return { ok: false, reason: "Benachrichtigungen sind für diese Seite nicht erlaubt." };
+    return { ok: false, reason: t("settings.subscribe.notAllowed") };
   }
 
   const registration = await readyRegistration();
   if (!registration) {
-    return { ok: false, reason: "Der Service Worker der App ist nicht aktiv. Lade die Seite neu und versuch es nochmal." };
+    return { ok: false, reason: t("settings.subscribe.noServiceWorker") };
   }
 
   let subscription: PushSubscription | null;
@@ -110,11 +113,11 @@ export async function subscribeToPush(supabase: PigeonClient, userId: string): P
       });
     }
   } catch (error) {
-    return { ok: false, reason: `Browser hat das Abo abgelehnt: ${(error as Error).message}` };
+    return { ok: false, reason: t("settings.subscribe.browserRejected", { message: (error as Error).message }) };
   }
 
   const json = subscription.toJSON();
-  if (!json.endpoint || !json.keys) return { ok: false, reason: "Der Browser hat ein unvollständiges Abo geliefert." };
+  if (!json.endpoint || !json.keys) return { ok: false, reason: t("settings.subscribe.incomplete") };
 
   const { error } = await supabase
     .from("push_subscriptions")
@@ -125,16 +128,12 @@ export async function subscribeToPush(supabase: PigeonClient, userId: string): P
       { user_id: userId, endpoint: json.endpoint, keys: json.keys },
       { onConflict: "endpoint", ignoreDuplicates: true }
     );
-  if (error) return { ok: false, reason: `Abo konnte nicht gespeichert werden: ${error.message}` };
+  if (error) return { ok: false, reason: t("settings.subscribe.saveFailed", { message: error.message }) };
 
   // ON CONFLICT DO NOTHING also "succeeds" when the endpoint is stored for
   // another account (shared device) — only a row of our own counts.
   if (!(await isSubscriptionStored(supabase, json.endpoint))) {
-    return {
-      ok: false,
-      reason:
-        "Dieses Gerät ist noch für ein anderes Konto registriert. Schalte Benachrichtigungen aus und wieder ein.",
-    };
+    return { ok: false, reason: t("settings.subscribe.otherAccount") };
   }
   return { ok: true };
 }

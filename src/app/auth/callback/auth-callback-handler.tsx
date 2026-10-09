@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useT } from "@/lib/i18n/client";
 import { completeAuthCallback } from "./actions";
 
 /**
@@ -39,6 +40,10 @@ function readAuthParams(search: URLSearchParams) {
 
 export function AuthCallbackHandler() {
   const searchParams = useSearchParams();
+  const t = useT();
+  // Read inside the effect without re-running the (one-shot) code exchange when the language changes.
+  const tRef = useRef(t);
+  tRef.current = t;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,7 +73,7 @@ export function AuthCallbackHandler() {
           return;
         }
       } else {
-        setErrorMessage("Kein gültiger Anmeldelink gefunden.");
+        setErrorMessage(tRef.current("auth.callback.noValidLink"));
         return;
       }
 
@@ -83,7 +88,7 @@ export function AuthCallbackHandler() {
   return (
     <main className="flex min-h-[100dvh] items-center justify-center px-6">
       <p className="text-sm text-neutral-500 dark:text-night-muted">
-        {errorMessage ? `Anmeldung fehlgeschlagen: ${errorMessage}` : "Wird angemeldet..."}
+        {errorMessage ? t("auth.callback.failed", { message: errorMessage }) : t("auth.callback.signingIn")}
       </p>
     </main>
   );

@@ -59,6 +59,9 @@ import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
 import { AvailabilityHint } from "@/components/chat/availability-hint";
 import type { Schedule } from "@/lib/schedule/schedule";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLocale, useT } from "@/lib/i18n/client";
+import { intlLocale, type Locale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
 import {
   discardMessage,
   retryMessage,
@@ -120,23 +123,32 @@ function draftStorageKey(userId: string, chatId: string) {
   return `pigeon-draft:${userId}:${chatId}`;
 }
 
-const timeFormat = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
+const timeFormats = new Map<Locale, Intl.DateTimeFormat>();
+function timeFormatFor(locale: Locale) {
+  let format = timeFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(intlLocale(locale), { hour: "2-digit", minute: "2-digit" });
+    timeFormats.set(locale, format);
+  }
+  return format;
+}
 
 function localDayStart(ms: number) {
   const d = new Date(ms);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/** "Heute", "Gestern", the weekday within the last week, else the date. */
-function dayLabel(ms: number, now: number): string {
+/** "Today", "Yesterday", the weekday within the last week, else the date. */
+function dayLabel(ms: number, now: number, locale: Locale, t: TFunction): string {
   // Rounded: a day with a DST switch is 23 or 25 hours long.
   const daysAgo = Math.round((localDayStart(now) - localDayStart(ms)) / 86_400_000);
-  if (daysAgo === 0) return "Heute";
-  if (daysAgo === 1) return "Gestern";
+  if (daysAgo === 0) return t("chatRoom.today");
+  if (daysAgo === 1) return t("chatRoom.yesterday");
   const date = new Date(ms);
-  if (daysAgo > 1 && daysAgo < 7) return date.toLocaleDateString("de-DE", { weekday: "long" });
+  const intl = intlLocale(locale);
+  if (daysAgo > 1 && daysAgo < 7) return date.toLocaleDateString(intl, { weekday: "long" });
   const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  return date.toLocaleDateString("de-DE", { day: "numeric", month: "long", ...(sameYear ? {} : { year: "numeric" }) });
+  return date.toLocaleDateString(intl, { day: "numeric", month: "long", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
 /** Sticky date pill between the messages of two different days. */
@@ -170,27 +182,29 @@ function MessageMeta({
   tone: "bubble" | "letter";
   inline?: boolean;
 }) {
+  const t = useT();
+  const locale = useLocale();
   return (
     <span
       className={`flex select-none items-center gap-1 whitespace-nowrap font-sans text-[10px] leading-none ${
         inline ? "relative top-2 float-right ml-2" : "justify-end"
       }`}
     >
-      <span className="opacity-60">{timeFormat.format(at)}</span>
+      <span className="opacity-60">{timeFormatFor(locale).format(at)}</span>
       {status === "pending" && (
-        <svg aria-label="Wird gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-3 w-3 opacity-60">
+        <svg aria-label={t("chatRoom.statusPending")} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-3 w-3 opacity-60">
           <circle cx="8" cy="8" r="6" />
           <path strokeLinecap="round" d="M8 4.8V8l2 1.5" />
         </svg>
       )}
       {status === "sent" && (
-        <svg aria-label="Gesendet" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3 w-3 opacity-60">
+        <svg aria-label={t("chatRoom.statusSent")} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3 w-3 opacity-60">
           <path strokeLinecap="round" strokeLinejoin="round" d="m3 8.5 3 3 7-7" />
         </svg>
       )}
       {status === "read" && (
         <svg
-          aria-label="Gelesen"
+          aria-label={t("chatRoom.statusRead")}
           viewBox="0 0 20 16"
           fill="none"
           stroke="currentColor"
@@ -205,11 +219,11 @@ function MessageMeta({
   );
 }
 
-function formatRemainingShort(arrivalIso: string | null, now: number): string | null {
+function formatRemainingShort(arrivalIso: string | null, now: number, t: TFunction): string | null {
   if (!arrivalIso) return null;
   const seconds = Math.max(0, (Date.parse(arrivalIso) - now) / 1000);
-  if (seconds < 60) return "gleich da";
-  return `noch ca. ${Math.ceil(seconds / 60)} Min`;
+  if (seconds < 60) return t("chatRoom.remainingSoon");
+  return t("chatRoom.remainingMinutes", { minutes: Math.ceil(seconds / 60) });
 }
 
 /**
@@ -230,6 +244,7 @@ function ChatImage({
   onLoad: () => void;
   onError: () => void;
 }) {
+  const t = useT();
   const [loaded, setLoaded] = useState(false);
 
   return (
@@ -238,7 +253,7 @@ function ChatImage({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
-        alt="Bild"
+        alt={t("chatRoom.imageAlt")}
         loading="lazy"
         decoding="async"
         onLoad={() => {
@@ -271,6 +286,8 @@ export function ChatRoom({
   initialPartnerLastReadAt,
   partnerSchedule,
 }: ChatRoomProps) {
+  const t = useT();
+  const locale = useLocale();
   const currentUserId = me.id;
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [flights, setFlights] = useState<Record<string, FlightRow>>({});
@@ -350,8 +367,8 @@ export function ChatRoom({
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
 
   const partnerName = displayNameOf(partner);
-  const myPigeonName = pigeonNameOf(me);
-  const partnerPigeonName = pigeonNameOf(partner);
+  const myPigeonName = pigeonNameOf(me, t);
+  const partnerPigeonName = pigeonNameOf(partner, t);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -389,7 +406,7 @@ export function ChatRoom({
       // Lets the (server-rendered) chat list show this without a refetch.
       for (const m of incoming) {
         noteChatActivity(chatId, {
-          preview: previewOf(m),
+          preview: previewOf(m, t),
           kind: m.kind,
           createdAt: m.created_at,
           fromMe: m.sender_id === currentUserId,
@@ -410,7 +427,7 @@ export function ChatRoom({
         return fresh.length > 0 ? [...prev, ...fresh] : prev;
       });
     },
-    [chatId, currentUserId]
+    [chatId, currentUserId, t]
   );
 
   // Messages I'm sending live in the outbox (lib/chat/outbox.ts), not in
@@ -796,7 +813,7 @@ export function ChatRoom({
       const next = { ...prev };
       for (const r of results) {
         if (r.url) delete next[r.path];
-        else next[r.path] = "Anhang konnte nicht geladen werden.";
+        else next[r.path] = t("chatRoom.attachmentLoadFailed");
       }
       return next;
     });
@@ -805,7 +822,7 @@ export function ChatRoom({
     results.forEach((r) => {
       if (!r.url) requestedSignedUrlPaths.current.delete(r.path);
     });
-  }, [currentUserId]);
+  }, [currentUserId, t]);
 
   // A signed URL that stops working (expired after SIGNED_URL_TTL_SECONDS
   // in a long-open tab) — drop it and fetch a fresh one.
@@ -878,16 +895,16 @@ export function ChatRoom({
     if (!quoted) {
       const flight = flights[quotedId];
       if (flight && flight.sender_id !== currentUserId && flight.status !== "delivered") {
-        return { author: partnerName, preview: "🕊️ Brief ist noch unterwegs", unavailable: true };
+        return { author: partnerName, preview: t("chatRoom.quoteLetterInFlight"), unavailable: true };
       }
       return quoted === null
-        ? { author: "Nachricht", preview: "Nachricht nicht mehr verfügbar", unavailable: true }
-        : { author: "…", preview: "Wird geladen…", unavailable: true };
+        ? { author: t("chatRoom.quoteMessageAuthor"), preview: t("chatRoom.quoteUnavailable"), unavailable: true }
+        : { author: "…", preview: t("chatRoom.quoteLoading"), unavailable: true };
     }
-    const preview = previewOf(quoted);
+    const preview = previewOf(quoted, t);
     return {
-      author: quoted.sender_id === currentUserId ? "Du" : partnerName,
-      preview: quoted.kind === "pigeon" ? `✉️ ${preview || "Brief"}` : preview,
+      author: quoted.sender_id === currentUserId ? t("chatRoom.quoteYou") : partnerName,
+      preview: quoted.kind === "pigeon" ? `✉️ ${preview || t("chatRoom.quoteLetterFallback")}` : preview,
     };
   }
 
@@ -951,6 +968,20 @@ export function ChatRoom({
     }
     return items.sort((a, b) => a.sortAt - b.sortAt);
   }, [currentUserId, displayMessages, flights, now]);
+
+  const dayGroups = useMemo(() => {
+    const groups: { key: string; items: TimelineItem[] }[] = [];
+    let lastDay: number | null = null;
+    for (const item of timeline) {
+      const day = localDayStart(item.sortAt);
+      if (day !== lastDay) {
+        groups.push({ key: item.key, items: [] });
+        lastDay = day;
+      }
+      groups[groups.length - 1].items.push(item);
+    }
+    return groups;
+  }, [timeline]);
 
   // Only items that show up after the first render get the entrance
   // animation — opening a chat doesn't make the whole history jump in.
@@ -1047,7 +1078,7 @@ export function ChatRoom({
     } else if (looksLikeImage(file)) {
       setAttachment({ kind: "image", file, previewUrl: createObjectUrl(file) });
     } else {
-      setComposerError("Nur Bilder und Videos können verschickt werden.");
+      setComposerError(t("chatRoom.onlyImagesAndVideos"));
     }
   }
 
@@ -1089,7 +1120,8 @@ export function ChatRoom({
 
   function handleVoiceRecorded(result: RecordedVoice) {
     setComposerError(null);
-    setAttachment({
+    // Like WhatsApp: releasing the mic sends the note straight away.
+    submitMessage({
       kind: "voice",
       blob: result.blob,
       previewUrl: createObjectUrl(result.blob),
@@ -1098,9 +1130,9 @@ export function ChatRoom({
     });
   }
 
-  function submitMessage() {
-    const text = draft.trim();
-    const attachmentToSend = attachment;
+  function submitMessage(attachmentOverride?: NonNullable<typeof attachment>) {
+    const text = attachmentOverride ? "" : draft.trim();
+    const attachmentToSend = attachmentOverride ?? attachment;
     if (!text && !attachmentToSend) return;
     const kind = mode;
     const replyToId = replyTo?.id ?? null;
@@ -1195,7 +1227,7 @@ export function ChatRoom({
     const before = draft.slice(0, start);
     const segments =
       typeof Intl.Segmenter === "function"
-        ? Array.from(new Intl.Segmenter("de", { granularity: "grapheme" }).segment(before), (s) => s.segment)
+        ? Array.from(new Intl.Segmenter(intlLocale(locale), { granularity: "grapheme" }).segment(before), (s) => s.segment)
         : Array.from(before);
     const cut = segments[segments.length - 1]?.length ?? 1;
     setDraft(before.slice(0, before.length - cut) + draft.slice(end));
@@ -1351,7 +1383,7 @@ export function ChatRoom({
         >
           {isLetter && (
             <p className="font-serif text-xs italic opacity-70">
-              ✉️ {isOwn ? `Brief an ${partnerName}` : `Brief von ${partnerName}`}
+              {isOwn ? t("chatRoom.letterTo", { name: partnerName }) : t("chatRoom.letterFrom", { name: partnerName })}
             </p>
           )}
           {message.reply_to_id && (() => {
@@ -1407,7 +1439,7 @@ export function ChatRoom({
               />
               {isUploading && !hasError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 text-xs text-white">
-                  <span>{message.uploadPhase === "processing" ? "Video wird verkleinert…" : "Wird hochgeladen…"}</span>
+                  <span>{message.uploadPhase === "processing" ? t("chatRoom.videoShrinking") : t("chatRoom.uploading")}</span>
                   <div className="h-1.5 w-2/3 overflow-hidden rounded-full bg-white/30">
                     <div
                       className="h-full bg-white transition-all"
@@ -1427,7 +1459,7 @@ export function ChatRoom({
                   onClick={() => fetchSignedUrls([{ bucket: CHAT_VIDEO_BUCKET, path: message.video_url! }])}
                   className="text-xs font-medium underline"
                 >
-                  Erneut versuchen
+                  {t("chatRoom.retry")}
                 </button>
               </div>
             ) : (
@@ -1443,7 +1475,7 @@ export function ChatRoom({
                   onClick={() => fetchSignedUrls([{ bucket: CHAT_IMAGE_BUCKET, path: message.image_url! }])}
                   className="text-xs font-medium underline"
                 >
-                  Erneut versuchen
+                  {t("chatRoom.retry")}
                 </button>
               </div>
             ) : (
@@ -1481,11 +1513,11 @@ export function ChatRoom({
                   onClick={() => fetchSignedUrls([{ bucket: CHAT_VOICE_BUCKET, path: message.audio_url! }])}
                   className="text-xs font-medium underline"
                 >
-                  Erneut versuchen
+                  {t("chatRoom.retry")}
                 </button>
               </div>
             ) : (
-              <div className="flex min-w-[180px] items-center gap-2" aria-label="Sprachnachricht wird geladen">
+              <div className="flex min-w-[180px] items-center gap-2" aria-label={t("chatRoom.voiceLoading")}>
                 <Skeleton className="h-8 w-8 flex-shrink-0 rounded-full" />
                 <Skeleton className="h-1.5 flex-1 rounded-full" />
                 <Skeleton className="h-3 w-8" />
@@ -1509,25 +1541,25 @@ export function ChatRoom({
                 onClick={() => retrySend(message)}
                 className="rounded-full bg-black/10 px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline dark:bg-white/15"
               >
-                Erneut versuchen
+                {t("chatRoom.retry")}
               </button>
               <button
                 type="button"
                 onClick={() => discardMessage(message.id)}
                 className="rounded-full px-2 py-0.5 text-xs opacity-80 underline-offset-2 hover:underline"
               >
-                Verwerfen
+                {t("chatRoom.discard")}
               </button>
             </div>
           )}
           {isEncrypting && !isUploading ? (
-            <span className="block font-mono text-[11px] opacity-70">🔐 Wird verschlüsselt…</span>
+            <span className="block font-mono text-[11px] opacity-70">{t("chatRoom.encrypting")}</span>
           ) : (
             // A chat message on its way just shows 🕓 next to its time.
             isLetter &&
             message.pending &&
             !hasError &&
-            !isUploading && <span className="text-xs opacity-70">Brief wird übergeben…</span>
+            !isUploading && <span className="text-xs opacity-70">{t("chatRoom.handingOver")}</span>
           )}
           {isLetter && !message.pending && !hasError && (
             <PigeonStatusBadge
@@ -1548,7 +1580,7 @@ export function ChatRoom({
   }
 
   function renderIncoming(flight: FlightRow) {
-    const remaining = formatRemainingShort(flight.arrival_time, now);
+    const remaining = formatRemainingShort(flight.arrival_time, now, t);
     return (
       <div className="flex justify-start">
         <button
@@ -1557,12 +1589,14 @@ export function ChatRoom({
           className="max-w-[80%] space-y-1 rounded-2xl border border-dashed border-[#d8c9a3] bg-[#f7f0df]/60 px-3 py-2 text-left text-sm text-[#5c4a37] hover:bg-[#f7f0df] sm:max-w-[75%] dark:border-night-border dark:bg-night-surface dark:text-night-text dark:hover:bg-night-raised"
         >
           <p className="font-medium">
-            <span className="pigeon-wing inline-block">🕊️</span> {partnerPigeonName} bringt dir einen Brief
+            <span className="pigeon-wing inline-block">🕊️</span> {t("chatRoom.incomingLetter", { pigeon: partnerPigeonName })}
           </p>
           <p className="text-xs opacity-70">
             {flight.status === "in_transit"
-              ? `Unterwegs${remaining ? ` · ${remaining}` : ""} · Flug verfolgen`
-              : "Macht sich startklar…"}
+              ? remaining
+                ? t("chatRoom.incomingInTransitEta", { remaining })
+                : t("chatRoom.incomingInTransit")
+              : t("chatRoom.incomingPreparing")}
           </p>
         </button>
       </div>
@@ -1596,33 +1630,36 @@ export function ChatRoom({
                 disabled={loadingOlder}
                 className="rounded-full px-3 py-1 text-xs text-neutral-400 hover:bg-neutral-100 disabled:hover:bg-transparent dark:text-night-muted dark:hover:bg-night-raised"
               >
-                {loadingOlder ? "Ältere Nachrichten werden geladen…" : "Ältere Nachrichten laden"}
+                {loadingOlder ? t("chatRoom.loadingOlder") : t("chatRoom.loadOlder")}
               </button>
             </div>
           )}
           {timeline.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-neutral-400 dark:text-night-muted">
               <span className="text-3xl">🕊️</span>
-              <p>Noch keine Nachrichten. Schreib {partnerName} — oder schick gleich eine Taube!</p>
+              <p>{t("chatRoom.empty", { name: partnerName })}</p>
             </div>
           )}
-          {timeline.map((item, index) => (
-            <Fragment key={item.key}>
-              {/* Direct children of the scroll container, so each one
-                  stays stuck at the top for as long as its day is in view. */}
-              {(index === 0 || localDayStart(item.sortAt) !== localDayStart(timeline[index - 1].sortAt)) && (
-                <DayDivider label={dayLabel(item.sortAt, now)} />
-              )}
-              <div
-                data-message-id={item.type === "message" ? item.message.id : undefined}
-                className={`-mx-2 rounded-2xl px-2 transition-colors duration-700 ${
-                  enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : ""
-                } ${item.key === highlightedId ? "bg-[#c1643a]/15 dark:bg-night-accent/20" : ""}`}
-              >
-                {item.key === firstUnreadKey && <UnreadDivider />}
-                {item.type === "message" ? renderMessage(item.message, item.sortAt) : renderIncoming(item.flight)}
-              </div>
-            </Fragment>
+          {dayGroups.map((group) => (
+            // One wrapper per day: a sticky pill only sticks while its own
+            // day is in view. As direct children of the scroll container
+            // they all stayed stuck and stacked up (older days ghosting
+            // through the translucent pill of the newest one).
+            <div key={group.key} className="space-y-2">
+              <DayDivider label={dayLabel(group.items[0].sortAt, now, locale, t)} />
+              {group.items.map((item) => (
+                <div
+                  key={item.key}
+                  data-message-id={item.type === "message" ? item.message.id : undefined}
+                  className={`-mx-2 rounded-2xl px-2 transition-colors duration-700 ${
+                    enteringTimelineKeysRef.current.has(item.key) ? "animate-message-in" : ""
+                  } ${item.key === highlightedId ? "bg-[#c1643a]/15 dark:bg-night-accent/20" : ""}`}
+                >
+                  {item.key === firstUnreadKey && <UnreadDivider />}
+                  {item.type === "message" ? renderMessage(item.message, item.sortAt) : renderIncoming(item.flight)}
+                </div>
+              ))}
+            </div>
           ))}
         </div>
         <NewMessagesButton count={unseenBelow} onClick={jumpToNewest} />
@@ -1639,16 +1676,13 @@ export function ChatRoom({
       >
         {isLetterMode && (
           <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[#8a7a5c] dark:text-night-muted">
-            <span>
-              ✉️ Brief an {partnerName} — {myPigeonName} fliegt ihn hin. Erst nach der Landung kann{" "}
-              {partnerName} ihn lesen.
-            </span>
+            <span>{t("chatRoom.letterBanner", { partner: partnerName, pigeon: myPigeonName })}</span>
             <button
               type="button"
               onClick={() => setMode("chat")}
               className="flex-shrink-0 underline"
             >
-              Abbrechen
+              {t("chatRoom.cancel")}
             </button>
           </div>
         )}
@@ -1658,7 +1692,7 @@ export function ChatRoom({
             <button
               type="button"
               onClick={() => setComposerError(null)}
-              aria-label="Hinweis schließen"
+              aria-label={t("chatRoom.dismissNotice")}
               className="flex-shrink-0 text-red-400 hover:text-red-600"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
@@ -1670,7 +1704,11 @@ export function ChatRoom({
         <AvailabilityHint schedule={partnerSchedule} partnerName={partnerName} />
         {replyTo && (
           <ReplyComposerPreview
-            title={replyTo.sender_id === currentUserId ? "Antwort auf deine Nachricht" : `Antwort an ${partnerName}`}
+            title={
+              replyTo.sender_id === currentUserId
+                ? t("chatRoom.replyToOwn")
+                : t("chatRoom.replyToPartner", { name: partnerName })
+            }
             preview={quoteInfoFor(replyTo.id).preview}
             onCancel={() => setReplyTo(null)}
           />
@@ -1695,7 +1733,7 @@ export function ChatRoom({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={attachment.previewUrl}
-                  alt="Ausgewähltes Bild"
+                  alt={t("chatRoom.selectedImageAlt")}
                   className="h-12 w-12 rounded-lg object-cover"
                 />
                 <span className="flex-1 truncate text-xs text-neutral-500 dark:text-night-muted">
@@ -1714,7 +1752,7 @@ export function ChatRoom({
             <button
               type="button"
               onClick={removeAttachment}
-              aria-label="Anhang entfernen"
+              aria-label={t("chatRoom.removeAttachment")}
               className="flex-shrink-0 rounded-full p-1 text-neutral-500 hover:bg-neutral-200 dark:text-night-muted dark:hover:bg-night-raised"
             >
               <svg
@@ -1741,7 +1779,7 @@ export function ChatRoom({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Bild oder Video anhängen"
+            aria-label={t("chatRoom.attachMedia")}
             className="flex-shrink-0 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg
@@ -1766,8 +1804,8 @@ export function ChatRoom({
               composerRef.current?.focus();
             }}
             aria-pressed={isLetterMode}
-            aria-label={isLetterMode ? "Zurück zum normalen Chat" : "Stattdessen per Brieftaube schicken"}
-            title={isLetterMode ? "Normaler Chat" : "Per Brieftaube schicken"}
+            aria-label={isLetterMode ? t("chatRoom.backToChat") : t("chatRoom.sendByPigeon")}
+            title={isLetterMode ? t("chatRoom.normalChatTitle") : t("chatRoom.sendByPigeonTitle")}
             className={`flex-shrink-0 rounded-full p-2 text-lg leading-none transition-colors ${
               isLetterMode
                 ? "bg-[#c1643a] text-white"
@@ -1789,8 +1827,10 @@ export function ChatRoom({
               onFocus={handleComposerFocus}
               rows={isLetterMode ? 3 : 1}
               enterKeyHint={isLetterMode ? "enter" : "send"}
-              aria-label={isLetterMode ? `Brief an ${partnerName}` : "Nachricht"}
-              placeholder={isLetterMode ? `Liebe/r ${partnerName}, …` : "Nachricht schreiben…"}
+              aria-label={isLetterMode ? t("chatRoom.letterAria", { name: partnerName }) : t("chatRoom.messageAria")}
+              placeholder={
+                isLetterMode ? t("chatRoom.letterPlaceholder", { name: partnerName }) : t("chatRoom.messagePlaceholder")
+              }
               className={`min-w-0 flex-1 resize-none overflow-hidden border py-1.5 pl-10 pr-4 text-base leading-6 sm:text-sm sm:leading-6 ${
                 isLetterMode
                   ? "rounded-xl border-[#d8c9a3] font-serif dark:border-night-border"
@@ -1802,9 +1842,9 @@ export function ChatRoom({
               // Desktop: keeps the cursor where it is in the text field.
               onMouseDown={(event) => event.preventDefault()}
               onClick={toggleEmojiPanel}
-              aria-label={emojiOpen ? "Tastatur" : "Emojis"}
+              aria-label={emojiOpen ? t("chatRoom.keyboard") : t("chatRoom.emojis")}
               aria-expanded={emojiOpen}
-              title={emojiOpen ? "Tastatur" : "Emojis"}
+              title={emojiOpen ? t("chatRoom.keyboard") : t("chatRoom.emojis")}
               className="absolute bottom-[3px] left-1 rounded-full p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
             >
               {emojiOpen ? (
@@ -1825,13 +1865,13 @@ export function ChatRoom({
               type="submit"
               // Keeps the focus (and the phone keyboard) in the text field.
               onMouseDown={(event) => event.preventDefault()}
-              aria-label={isLetterMode ? "Losfliegen" : "Senden"}
+              aria-label={isLetterMode ? t("chatRoom.launch") : t("chatRoom.send")}
               className={`flex-shrink-0 rounded-full text-sm ${
                 isLetterMode ? "bg-[#c1643a] px-4 py-2 text-white" : "bg-accent p-2 text-on-accent"
               }`}
             >
               {isLetterMode ? (
-                "Losfliegen"
+                t("chatRoom.launch")
               ) : (
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.27 3.13a59.77 59.77 0 0 1 18.22 8.87 59.77 59.77 0 0 1-18.22 8.88L6 12Zm0 0h7.5" />
@@ -1857,7 +1897,11 @@ export function ChatRoom({
             loading={flightsLoading}
             onClose={closeFlightMap}
             pigeonName={openFlightIsMine ? myPigeonName : partnerPigeonName}
-            routeLabel={openFlightIsMine ? `zu ${partnerName}` : `von ${partnerName}`}
+            routeLabel={
+              openFlightIsMine
+                ? t("chatRoom.routeTo", { name: partnerName })
+                : t("chatRoom.routeFrom", { name: partnerName })
+            }
           />
         )}
       </AnimatePresence>

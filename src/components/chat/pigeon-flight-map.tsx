@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { FlightRow } from "@/lib/chat/flights";
-import { describePigeonEvent } from "@/lib/chat/pigeon-event-descriptions";
+import { describePigeonEvent, pigeonEventLabel } from "@/lib/chat/pigeon-event-descriptions";
+import type { TFunction } from "@/lib/i18n/translate";
+import { useT } from "@/lib/i18n/client";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface PigeonFlightMapProps {
@@ -44,12 +46,12 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-function formatRemaining(seconds: number): string {
-  if (seconds <= 0) return "Angekommen";
+function formatRemaining(seconds: number, t: TFunction): string {
+  if (seconds <= 0) return t("chatMisc.map.arrived");
   const minutes = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
-  if (minutes <= 0) return `${secs}s`;
-  return `${minutes} Min ${secs.toString().padStart(2, "0")}s`;
+  if (minutes <= 0) return t("chatMisc.map.timeSec", { seconds: secs });
+  return t("chatMisc.map.timeMinSec", { minutes, seconds: secs.toString().padStart(2, "0") });
 }
 
 function PigeonIcon({ flapping }: { flapping: boolean }) {
@@ -95,6 +97,7 @@ function CloudPuff({ x, y }: { x: number; y: number }) {
 }
 
 export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLabel }: PigeonFlightMapProps) {
+  const t = useT();
   const [now, setNow] = useState(() => Date.now());
   const [shaking, setShaking] = useState(false);
   const [landing, setLanding] = useState(false);
@@ -140,7 +143,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
 
   const elapsedSeconds =
     departureMs !== null ? Math.max(0, (now - departureMs) / 1000) : 0;
-  const t =
+  const progress =
     isDelivered || (durationSeconds && elapsedSeconds >= durationSeconds)
       ? 1
       : departureMs !== null && durationSeconds
@@ -177,13 +180,13 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
     const path = pathRef.current;
     if (!path) return { x: DEPARTURE_POINT.x, y: DEPARTURE_POINT.y, angle: 0 };
     const length = path.getTotalLength();
-    const point = path.getPointAtLength(length * t);
-    const lookahead = path.getPointAtLength(Math.min(length, length * t + 1));
+    const point = path.getPointAtLength(length * progress);
+    const lookahead = path.getPointAtLength(Math.min(length, length * progress + 1));
     const angle = (Math.atan2(lookahead.y - point.y, lookahead.x - point.x) * 180) / Math.PI;
     return { x: point.x, y: point.y, angle };
-    // pathRef.current is stable across renders once mounted; re-run on `t`.
+    // pathRef.current is stable across renders once mounted; re-run on `progress`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t]);
+  }, [progress]);
 
   const isReady = departureMs !== null && durationSeconds !== null;
 
@@ -206,7 +209,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Taubenflug"
+      aria-label={t("chatMisc.map.dialog")}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
@@ -226,20 +229,20 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
             </h2>
             <p className="text-xs text-[#8a7a5c] dark:text-night-muted">
               {justLanded
-                ? "Gelandet! Der Brief liegt jetzt im Chat ✉️"
+                ? t("chatMisc.map.landed")
                 : isDelivered
-                  ? "Angekommen 🎉"
+                  ? t("chatMisc.map.arrivedParty")
                   : isReady
-                    ? `${formatRemaining(remainingSeconds ?? 0)} verbleibend`
+                    ? t("chatMisc.map.remaining", { time: formatRemaining(remainingSeconds ?? 0, t) })
                     : loading
-                      ? "Flugdaten werden geladen…"
-                      : "Die Taube wird vorbereitet…"}
+                      ? t("chatMisc.map.loading")
+                      : t("chatMisc.map.preparing")}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Schließen"
+            aria-label={t("chatMisc.close")}
             className="flex-shrink-0 rounded-full p-2 text-[#8a7a5c] hover:bg-[#ecdfc0] dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -256,7 +259,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
             {!flight && loading && (
               <Skeleton className="absolute inset-0 z-10 rounded-none opacity-70" />
             )}
-            <svg viewBox={VIEWBOX} className="block w-full" role="img" aria-label="Karte des Taubenflugs">
+            <svg viewBox={VIEWBOX} className="block w-full" role="img" aria-label={t("chatMisc.map.mapLabel")}>
               <defs>
                 <radialGradient id="pigeon-paper-bg" cx="50%" cy="35%" r="75%">
                   <stop offset="0%" stopColor="#faf3df" />
@@ -281,10 +284,10 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
               <path d={ASIA_LANDMASS_D} fill="#8a9b6e" stroke="#5f7048" strokeWidth={1} />
 
               <text x={175} y={100} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[20px]">
-                Deutschland
+                {t("chatMisc.map.germany")}
               </text>
               <text x={655} y={90} textAnchor="middle" className="fill-[#5c4a37] font-serif text-[20px]">
-                China
+                {t("chatMisc.map.china")}
               </text>
 
               {/* Route */}
@@ -323,7 +326,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e0d3ae]">
                   <div
                     className="h-full rounded-full bg-[#c1643a] transition-all duration-1000"
-                    style={{ width: `${t * 100}%` }}
+                    style={{ width: `${progress * 100}%` }}
                   />
                 </div>
               </div>
@@ -332,7 +335,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
 
           <div className="space-y-2 px-4 py-4 sm:px-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[#8a7a5c] dark:text-night-muted">
-              Reiseprotokoll
+              {t("chatMisc.map.log")}
             </h3>
             {!flight && loading ? (
               <div className="space-y-2">
@@ -341,7 +344,7 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
               </div>
             ) : passedEvents.length === 0 ? (
               <p className="text-sm text-[#8a7a5c] dark:text-night-muted">
-                {isReady ? "Noch nichts Aufregendes passiert…" : "Die Taube startet gleich."}
+                {isReady ? t("chatMisc.map.nothingYet") : t("chatMisc.map.startingSoon")}
               </p>
             ) : (
               <ul className="space-y-2">
@@ -356,8 +359,8 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
                     >
                       <span className="text-lg leading-none">{event.emoji}</span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[#5c4a37] dark:text-night-text">{event.label}</p>
-                        <p className="text-xs text-[#8a7a5c] dark:text-night-muted">{describePigeonEvent(event.type)}</p>
+                        <p className="text-sm font-medium text-[#5c4a37] dark:text-night-text">{pigeonEventLabel(event, t)}</p>
+                        <p className="text-xs text-[#8a7a5c] dark:text-night-muted">{describePigeonEvent(event.type, t)}</p>
                       </div>
                       <span
                         className={`flex-shrink-0 text-xs font-medium ${
@@ -366,8 +369,9 @@ export function PigeonFlightMap({ flight, loading, onClose, pigeonName, routeLab
                             : "text-[#8a7a5c] dark:text-night-muted"
                         }`}
                       >
-                        {event.duration_impact_seconds < 0 ? "−" : "+"}
-                        {Math.round(Math.abs(event.duration_impact_seconds) / 60) || 1} Min
+                        {t(event.duration_impact_seconds < 0 ? "chatMisc.map.impactSaved" : "chatMisc.map.impactLost", {
+                          minutes: Math.round(Math.abs(event.duration_impact_seconds) / 60) || 1,
+                        })}
                       </span>
                     </motion.li>
                   ))}

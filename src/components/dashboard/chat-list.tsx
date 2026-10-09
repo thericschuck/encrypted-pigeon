@@ -7,22 +7,26 @@ import { MotionConfig, motion } from "framer-motion";
 import type { ChatListItem } from "@/lib/chat/chat-overview";
 import { displayNameOf, type MemberProfile } from "@/lib/profile";
 import { startChat } from "@/app/actions/chats";
+import { useLocale, useT } from "@/lib/i18n/client";
+import { intlLocale, type Locale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
 import { Avatar } from "@/components/ui/avatar";
 import { AvatarScheduleDot } from "@/components/schedule/schedule-status";
 
-function formatListTime(iso: string): string {
+function formatListTime(iso: string, locale: Locale, t: TFunction): string {
   const date = new Date(iso);
   const now = new Date();
   const sameDay = date.toDateString() === now.toDateString();
-  if (sameDay) return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return date.toLocaleTimeString(intlLocale(locale), { hour: "2-digit", minute: "2-digit" });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) return "Gestern";
-  return date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  if (date.toDateString() === yesterday.toDateString()) return t("dashboard.yesterday");
+  return date.toLocaleDateString(intlLocale(locale), { day: "2-digit", month: "2-digit" });
 }
 
 function StartChatButton({ member }: { member: MemberProfile }) {
   const { pending } = useFormStatus();
+  const t = useT();
   return (
     <button
       type="submit"
@@ -32,7 +36,7 @@ function StartChatButton({ member }: { member: MemberProfile }) {
       <Avatar profile={member} size="sm" />
       <span className="min-w-0 flex-1 truncate">{displayNameOf(member)}</span>
       <span className="text-xs text-neutral-400 dark:text-night-muted">
-        {pending ? "Öffne…" : "Schreiben"}
+        {pending ? t("dashboard.opening") : t("dashboard.write")}
       </span>
     </button>
   );
@@ -45,16 +49,18 @@ interface ChatListProps {
 
 export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
   const pathname = usePathname();
+  const t = useT();
+  const locale = useLocale();
 
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-1">
         <h2 className="px-3 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-          Chats
+          {t("dashboard.chats")}
         </h2>
         {chats.length === 0 ? (
           <p className="px-3 py-2 text-sm text-neutral-400 dark:text-night-muted">
-            Noch keine Chats. Starte unten eine Unterhaltung.
+            {t("dashboard.noChats")}
           </p>
         ) : (
           // A chat that gets a new message glides to the top instead of
@@ -78,7 +84,7 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                       aria-current={active ? "page" : undefined}
                       aria-label={
                         unread > 0
-                          ? `${displayNameOf(chat.partner)}, ${unread === 1 ? "1 ungelesene Nachricht" : `${unread} ungelesene Nachrichten`}`
+                          ? t("dashboard.unreadAria", { name: displayNameOf(chat.partner), count: unread })
                           : undefined
                       }
                       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${
@@ -104,7 +110,7 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                                   : "text-neutral-400 dark:text-night-muted"
                               }`}
                             >
-                              {formatListTime(last.createdAt)}
+                              {formatListTime(last.createdAt, locale, t)}
                             </span>
                           )}
                         </div>
@@ -118,16 +124,16 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
                           >
                             {chat.incomingLetterIds.length > 0 ? (
                               <span className="font-medium text-[#b0532b] dark:text-night-accent">
-                                🕊️ Eine Taube ist zu dir unterwegs…
+                                {t("dashboard.pigeonOnTheWay")}
                               </span>
                             ) : last ? (
                               <>
-                                {last.fromMe && "Du: "}
+                                {last.fromMe && t("dashboard.you")}
                                 {last.kind === "pigeon" && "✉️ "}
                                 {last.preview}
                               </>
                             ) : (
-                              "Noch keine Nachrichten"
+                              t("dashboard.noMessages")
                             )}
                           </p>
                           {unread > 0 && (
@@ -153,7 +159,7 @@ export function ChatList({ chats, membersWithoutChat }: ChatListProps) {
       {membersWithoutChat.length > 0 && (
         <section className="flex flex-col gap-1">
           <h2 className="px-3 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-            Neue Unterhaltung
+            {t("dashboard.newConversation")}
           </h2>
           <ul className="flex flex-col gap-0.5">
             {membersWithoutChat.map((member) => (

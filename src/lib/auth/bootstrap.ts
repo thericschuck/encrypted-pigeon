@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAdminEmail, isAdminEmail } from "@/lib/auth/admin-email";
+import type { Locale } from "@/lib/i18n/config";
 
 interface AuthUser {
   id: string;
@@ -43,19 +44,27 @@ export async function ensureMembership(user: AuthUser): Promise<MembershipResult
   if (profileError) throw profileError;
 
   if (!existingProfile) {
+    // The language the admin picked when inviting (invites.language), if any.
+    let inviteLanguage: Locale | null = null;
     if (!isAdmin) {
       const { data: invite, error: inviteError } = await admin
         .from("invites")
-        .select("email")
+        .select("email, language")
         .eq("email", email)
         .maybeSingle();
       if (inviteError) throw inviteError;
       if (!invite) return { status: "not_invited" };
+      inviteLanguage = invite.language;
     }
 
     const { error } = await admin
       .from("profiles")
-      .insert({ id: user.id, email: user.email, is_admin: isAdmin });
+      .insert({
+        id: user.id,
+        email: user.email,
+        is_admin: isAdmin,
+        ...(inviteLanguage ? { language: inviteLanguage } : {}),
+      });
     // 23505: a parallel request (e.g. two tabs) created it first — fine.
     if (error && error.code !== "23505") throw error;
 

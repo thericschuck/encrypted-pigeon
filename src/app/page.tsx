@@ -10,6 +10,7 @@ import { inviteUser } from "@/app/admin/invite/actions";
 import { MagicLinkForm } from "@/components/magic-link-form";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
+import { getT } from "@/lib/i18n/server";
 import { Avatar } from "@/components/ui/avatar";
 import { LiveChatList } from "@/components/dashboard/live-chat-list";
 import { MemberManagement } from "@/components/dashboard/member-management";
@@ -26,7 +27,7 @@ async function loadPendingInvites() {
 }
 
 export default async function DashboardPage() {
-  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
+  const [supabase, user, t] = await Promise.all([getServerSupabase(), getCurrentUser(), getT()]);
 
   if (!user?.email) {
     redirect("/login");
@@ -34,7 +35,7 @@ export default async function DashboardPage() {
 
   const isAdmin = isAdminEmail(user.email);
   const [initialOverview, pendingInvites] = await Promise.all([
-    loadChatOverview(supabase, user.id),
+    loadChatOverview(supabase, user.id, t),
     isAdmin ? loadPendingInvites() : Promise.resolve([]),
   ]);
   let overview = initialOverview;
@@ -47,28 +48,28 @@ export default async function DashboardPage() {
     if (membership.status === "not_invited") {
       redirect("/auth/signout?error=not_invited");
     }
-    overview = await loadChatOverview(supabase, user.id);
+    overview = await loadChatOverview(supabase, user.id, t);
   }
   const { me } = overview;
 
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <SessionWatcher />
-      {me && <ThemeSync theme={me.theme} accent={me.accent_color} />}
+      {me && <ThemeSync theme={me.theme} accent={me.accent_color} language={me.language} />}
 
       <header className="flex items-center gap-3 px-3">
         <Avatar profile={me} size="md" />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold">Hallo, {displayNameOf(me)} 👋</h1>
+          <h1 className="truncate text-lg font-semibold">{t("dashboard.greeting", { name: displayNameOf(me) })}</h1>
           <p className="truncate text-xs text-neutral-500 dark:text-night-muted">
-            🕊️ {pigeonNameOf(me)} wartet auf ihren nächsten Brief.
+            {t("dashboard.pigeonWaiting", { pigeon: pigeonNameOf(me, t) })}
           </p>
         </div>
         {isAdmin && (
           <Link
             href="/ai"
-            aria-label="KI-Assistent"
-            title="KI-Assistent"
+            aria-label={t("dashboard.aiAssistant")}
+            title={t("dashboard.aiAssistant")}
             className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -79,8 +80,8 @@ export default async function DashboardPage() {
         {isAdmin && (
           <Link
             href="/translate"
-            aria-label="Übersetzer"
-            title="Übersetzer"
+            aria-label={t("dashboard.translator")}
+            title={t("dashboard.translator")}
             className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -90,7 +91,7 @@ export default async function DashboardPage() {
         )}
         <Link
           href="/schedule"
-          aria-label="Mein Wochenplan"
+          aria-label={t("dashboard.mySchedule")}
           className="flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -100,7 +101,7 @@ export default async function DashboardPage() {
         </Link>
         <Link
           href="/settings"
-          aria-label="Einstellungen"
+          aria-label={t("dashboard.settings")}
           className="-ml-2 flex-shrink-0 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised dark:hover:text-night-text"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -119,13 +120,17 @@ export default async function DashboardPage() {
       {isAdmin && (
         <section className="flex flex-col gap-3 rounded-2xl border border-neutral-200 p-4 dark:border-night-border dark:bg-night-surface">
           <div>
-            <h2 className="text-sm font-semibold">Freund einladen</h2>
+            <h2 className="text-sm font-semibold">{t("dashboard.inviteTitle")}</h2>
             <p className="mt-0.5 text-xs text-neutral-500 dark:text-night-muted">
-              Schickt einen Anmeldelink. Nur eingeladene E-Mails können Encrypted Pigeon nutzen —
-              und schreiben dann mit dir. Andere Mitglieder sehen sie nicht.
+              {t("dashboard.inviteHint")}
             </p>
           </div>
-          <MagicLinkForm action={inviteUser} submitLabel="Einladen" pendingLabel="Wird versendet..." />
+          <MagicLinkForm
+            action={inviteUser}
+            submitLabel={t("dashboard.inviteSubmit")}
+            pendingLabel={t("dashboard.invitePending")}
+            withLanguage
+          />
         </section>
       )}
 

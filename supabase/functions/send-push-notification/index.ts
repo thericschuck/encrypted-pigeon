@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
+import { type Locale, normalizeLocale, pushT } from "../_shared/i18n.ts";
 import { forbiddenResponse, isServiceRoleRequest } from "../_shared/service-role-auth.ts";
 
 /**
@@ -73,7 +74,6 @@ interface Notification {
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY");
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY");
-const DEFAULT_PIGEON_NAME = "Deine Taube";
 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails("mailto:pigeon@encrypted-pigeon.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -83,29 +83,34 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-function displayName(profile: ProfileRow | undefined): string {
-  return profile?.display_name?.trim() || profile?.email.split("@")[0] || "Jemand";
+function displayName(profile: ProfileRow | undefined, locale: Locale): string {
+  return profile?.display_name?.trim() || profile?.email.split("@")[0] || pushT(locale, "someone");
 }
 
-function contentPreview(message: MessageRow): string {
+function contentPreview(message: MessageRow, locale: Locale): string {
   if (message.content) return truncate(message.content, 120);
-  if (message.image_url) return "📷 Bild";
-  if (message.video_url) return "🎬 Video";
-  if (message.audio_url) return "🎤 Sprachnachricht";
-  return "Neue Nachricht";
+  if (message.image_url) return pushT(locale, "previewImage");
+  if (message.video_url) return pushT(locale, "previewVideo");
+  if (message.audio_url) return pushT(locale, "previewVoice");
+  return pushT(locale, "previewNew");
 }
 
-/** Returns null when this user shouldn't get a push for this event. */
+/**
+ * Returns null when this user shouldn't get a push for this event. Texts are
+ * written in the recipient's language (profiles.language).
+ */
 function buildNotification(
   body: RequestBody,
   message: MessageRow,
   targetUserId: string,
-  sender: ProfileRow | undefined
+  sender: ProfileRow | undefined,
+  locale: Locale
 ): Notification | null {
   const url = `/chat/${message.chat_id}`;
   const isSender = targetUserId === message.sender_id;
-  const senderName = displayName(sender);
+  const senderName = displayName(sender, locale);
   const pigeonName = sender?.pigeon_name?.trim() || null;
+  const defaultPigeonName = pushT(locale, "defaultPigeonName");
   const flightTag = `flight-${body.message_id}`;
 
   if (body.event_type === "message") {
@@ -114,8 +119,10 @@ function buildNotification(
     if (message.kind === "pigeon") {
       return {
         type: "letter_incoming",
-        title: `🕊️ ${pigeonName ?? "Eine Brieftaube"} ist zu dir unterwegs`,
-        body: `${senderName} hat dir einen Brief geschickt. Verfolge den Flug im Chat!`,
+        title: pushT(locale, "letterIncomingTitle", {
+          pigeon: pigeonName ?? pushT(locale, "aPigeon"),
+        }),
+        body: pushT(locale, "letterIncomingBody", { sender: senderName }),
         tag: flightTag,
         url,
       };
@@ -123,33 +130,41 @@ function buildNotification(
     return {
       type: "chat",
       title: `💬 ${senderName}`,
-      body: contentPreview(message),
+      body: contentPreview(message, locale),
       tag: `chat-${message.chat_id}`,
       url,
     };
   }
 
   if (body.event_type === "incident") {
-    const label = body.event?.label ?? "Unterwegs ist etwas passiert.";
+    const label = body.event?.label ?? pushT(locale, "incidentFallback");
     const emoji = body.event?.emoji ?? "⚠️";
-    const who = isSender ? (pigeonName ?? DEFAULT_PIGEON_NAME) : `Die Taube von ${senderName}`;
-    return { type: "incident", title: `🕊️ ${who}: Zwischenfall!`, body: `${emoji} ${label}`, tag: flightTag, url };
+    const who = isSender
+      ? (pigeonName ?? defaultPigeonName)
+      : pushT(locale, "incidentOtherPigeon", { sender: senderName });
+    return {
+      type: "incident",
+      title: pushT(locale, "incidentTitle", { who }),
+      body: `${emoji} ${label}`,
+      tag: flightTag,
+      url,
+    };
   }
 
   // arrived
   if (isSender) {
     return {
       type: "own_arrived",
-      title: `🕊️ ${pigeonName ?? DEFAULT_PIGEON_NAME} ist angekommen`,
-      body: "Dein Brief wurde zugestellt.",
+      title: pushT(locale, "ownArrivedTitle", { pigeon: pigeonName ?? defaultPigeonName }),
+      body: pushT(locale, "ownArrivedBody"),
       tag: flightTag,
       url,
     };
   }
   return {
     type: "letter_arrived",
-    title: `✉️ Brief von ${senderName} ist da!`,
-    body: contentPreview(message),
+    title: pushT(locale, "letterArrivedTitle", { sender: senderName }),
+    body: contentPreview(message, locale),
     tag: flightTag,
     url,
   };
@@ -188,6 +203,7 @@ Deno.serve(async (req: Request) => {
     if (!body.user_id) {
       return new Response(JSON.stringify({ error: "user_id is required" }), { status: 400 });
     }
+    const testLocale = (await loadLanguages(supabase, [body.user_id])).get(body.user_id) ?? "de";
     return sendToUsers(
       supabase,
       new Map([
@@ -195,8 +211,8 @@ Deno.serve(async (req: Request) => {
           body.user_id,
           {
             type: "chat",
-            title: "🕊️ Test-Benachrichtigung",
-            body: "Benachrichtigungen funktionieren auf diesem Gerät.",
+            title: pushT(testLocale, "testTitle"),
+            body: pushT(testLocale, "testBody"),
             tag: "test",
             url: "/settings",
           },
@@ -252,13 +268,24 @@ Deno.serve(async (req: Request) => {
     )
   );
 
+  const languageByUser = await loadLanguages(
+    supabase,
+    participants.map((p) => p.user_id)
+  );
+
   const notificationsByUser = new Map<string, Notification>();
   const now = Date.now();
   for (const { user_id, viewing_until } of participants) {
     // Has this very chat open and visible right now (heartbeat from the
     // app): they see it happen live, a push on top would only be noise.
     if (viewing_until && Date.parse(viewing_until) > now) continue;
-    const notification = buildNotification(body, message, user_id, senderProfile ?? undefined);
+    const notification = buildNotification(
+      body,
+      message,
+      user_id,
+      senderProfile ?? undefined,
+      languageByUser.get(user_id) ?? "de"
+    );
     if (!notification) continue;
     if (prefsByUser.get(user_id)?.[notification.type] === false) continue;
     notificationsByUser.set(user_id, notification);
@@ -276,6 +303,28 @@ Deno.serve(async (req: Request) => {
 
   return sendToUsers(supabase, notificationsByUser);
 });
+
+/**
+ * Recipients' UI language (profiles.language). Separate query on purpose: a
+ * failure (or a missing column) must only cost the translation, never the
+ * push itself — everyone then falls back to German.
+ */
+async function loadLanguages(
+  supabase: ReturnType<typeof createClient>,
+  userIds: string[]
+): Promise<Map<string, Locale>> {
+  const result = new Map<string, Locale>();
+  if (userIds.length === 0) return result;
+  const { data, error } = await supabase.from("profiles").select("id, language").in("id", userIds);
+  if (error) {
+    console.error("Language lookup failed:", error.message);
+    return result;
+  }
+  for (const row of (data ?? []) as { id: string; language: string | null }[]) {
+    result.set(row.id, normalizeLocale(row.language));
+  }
+  return result;
+}
 
 /** Sends each user's notification to all of their stored devices. */
 async function sendToUsers(

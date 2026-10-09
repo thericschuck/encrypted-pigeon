@@ -25,7 +25,7 @@ export async function compressChatImage(file: File): Promise<ProcessedImage> {
     // rather than refuse it — the recipient's browser may well show it.
     console.warn("Image could not be processed, sending original:", error);
     if (file.size > MAX_IMAGE_BYTES) {
-      throw new ChatUploadError("Bild ist zu groß und konnte nicht verkleinert werden.");
+      throw new ChatUploadError("chatMisc.upload.imageTooLarge");
     }
     const extension = fileExtension(file) || "jpg";
     return {

@@ -8,7 +8,6 @@ import {
   ACCENT_PRESETS,
   AVATAR_BUCKET,
   DEFAULT_ACCENT,
-  DEFAULT_PIGEON_NAME,
   type MemberProfile,
 } from "@/lib/profile";
 import { applyThemeInBrowser } from "@/lib/theme";
@@ -19,11 +18,12 @@ import {
   redirectToLoginForExpiredSession,
 } from "@/lib/auth/session-expiry";
 import { Avatar } from "@/components/ui/avatar";
+import { useT } from "@/lib/i18n/client";
 
-const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Hell" },
-  { value: "dark", label: "Dunkel" },
+const THEME_OPTIONS: { value: ThemePreference; labelKey: string }[] = [
+  { value: "system", labelKey: "settings.profile.themeSystem" },
+  { value: "light", labelKey: "settings.profile.themeLight" },
+  { value: "dark", labelKey: "settings.profile.themeDark" },
 ];
 
 // 2x the largest avatar size (lg = 80 CSS px) for sharp high-DPI screens.
@@ -43,6 +43,7 @@ interface ProfileSettingsProps {
  * soon as it's picked, names shortly after typing stops.
  */
 export function ProfileSettings({ profile }: ProfileSettingsProps) {
+  const t = useT();
   const router = useRouter();
   const [displayName, setDisplayName] = useState(profile.display_name ?? "");
   const [pigeonName, setPigeonName] = useState(profile.pigeon_name ?? "");
@@ -76,10 +77,10 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
       status: "error",
       message:
         typeof navigator !== "undefined" && !navigator.onLine
-          ? "Keine Internetverbindung — nicht gespeichert."
-          : "Speichern fehlgeschlagen. Bitte erneut versuchen.",
+          ? t("settings.profile.offline")
+          : t("settings.profile.saveFailed"),
     });
-  }, []);
+  }, [t]);
 
   const persist = useCallback(
     (update: ProfileUpdate): Promise<boolean> => {
@@ -88,7 +89,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
         try {
           const { error } = await createClient().from("profiles").update(update).eq("id", profile.id);
           if (error) throw error;
-          setSave({ status: "saved", message: "Gespeichert ✓" });
+          setSave({ status: "saved", message: t("settings.profile.saved") });
           router.refresh();
           return true;
         } catch (error) {
@@ -100,7 +101,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
       saveQueueRef.current = next;
       return next;
     },
-    [profile.id, reportError, router]
+    [profile.id, reportError, router, t]
   );
 
   const flushText = useCallback(() => {
@@ -158,7 +159,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
     event.target.value = "";
     if (!file) return;
     if (!looksLikeImage(file)) {
-      setSave({ status: "error", message: "Bitte ein Bild auswählen." });
+      setSave({ status: "error", message: t("settings.profile.pickImage") });
       return;
     }
 
@@ -181,7 +182,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
     } catch (error) {
       setAvatarPreview(null);
       if (error instanceof Error && /decode|empty image|canvas|encode/.test(error.message)) {
-        setSave({ status: "error", message: "Dieses Bild kann nicht gelesen werden. Bitte ein anderes wählen." });
+        setSave({ status: "error", message: t("settings.profile.imageUnreadable") });
       } else {
         reportError(error);
       }
@@ -209,7 +210,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-neutral-200 p-4 dark:border-night-border dark:bg-night-surface">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">Profil</h2>
+        <h2 className="text-sm font-semibold">{t("settings.profile.title")}</h2>
         {save.status !== "idle" && (
           <span
             role={save.status === "error" ? "alert" : "status"}
@@ -221,7 +222,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
                   : "text-emerald-700 dark:text-emerald-400"
             }`}
           >
-            {save.status === "saving" ? "Speichert…" : save.message}
+            {save.status === "saving" ? t("settings.profile.saving") : save.message}
           </span>
         )}
       </div>
@@ -249,7 +250,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
             onClick={() => fileInputRef.current?.click()}
             className="rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent disabled:opacity-50"
           >
-            {avatarPath ? "Bild ändern" : "Bild wählen"}
+            {avatarPath ? t("settings.profile.changeImage") : t("settings.profile.chooseImage")}
           </button>
           {avatarPath && (
             <button
@@ -258,14 +259,14 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
               onClick={() => void handleAvatarRemove()}
               className="text-xs text-neutral-500 underline disabled:opacity-50 dark:text-night-muted"
             >
-              Bild entfernen
+              {t("settings.profile.removeImage")}
             </button>
           )}
         </div>
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Anzeigename</span>
+        <span className="font-medium">{t("settings.profile.displayName")}</span>
         <input
           value={displayName}
           onChange={(event) => {
@@ -277,11 +278,11 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
           placeholder={profile.email.split("@")[0]}
           className="rounded-lg border border-neutral-300 px-3 py-2 text-base focus:border-accent focus:outline-none sm:text-sm dark:border-night-border"
         />
-        <span className="text-xs text-neutral-500 dark:text-night-muted">So sehen dich die anderen.</span>
+        <span className="text-xs text-neutral-500 dark:text-night-muted">{t("settings.profile.displayNameHint")}</span>
       </label>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Name deiner Brieftaube</span>
+        <span className="font-medium">{t("settings.profile.pigeonName")}</span>
         <input
           value={pigeonName}
           onChange={(event) => {
@@ -290,25 +291,25 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
           }}
           onBlur={flushText}
           maxLength={30}
-          placeholder={DEFAULT_PIGEON_NAME}
+          placeholder={t("system.defaultPigeonName")}
           className="rounded-lg border border-neutral-300 px-3 py-2 text-base focus:border-accent focus:outline-none sm:text-sm dark:border-night-border"
         />
         <span className="text-xs text-neutral-500 dark:text-night-muted">
-          Erscheint auf der Flugkarte und in den Benachrichtigungen.
+          {t("settings.profile.pigeonNameHint")}
         </span>
       </label>
 
       <fieldset className="flex flex-col gap-2 text-sm">
-        <legend className="mb-2 font-medium">Akzentfarbe</legend>
+        <legend className="mb-2 font-medium">{t("settings.profile.accent")}</legend>
         <div className="flex flex-wrap gap-2">
           {ACCENT_PRESETS.map((preset) => (
             <button
               key={preset.value}
               type="button"
               onClick={() => handleAccentChange(preset.value)}
-              aria-label={preset.label}
+              aria-label={t(preset.labelKey)}
               aria-pressed={accent === preset.value}
-              title={preset.label}
+              title={t(preset.labelKey)}
               style={{ backgroundColor: preset.value }}
               className={`h-9 w-9 rounded-full ring-offset-2 ring-offset-white transition dark:ring-offset-night-surface ${
                 accent === preset.value ? "ring-2 ring-neutral-400 dark:ring-night-muted" : ""
@@ -317,15 +318,15 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
           ))}
         </div>
         <div className="mt-1 flex">
-          <span className="rounded-2xl bg-bubble px-3 py-2 text-sm text-white">So sehen deine Nachrichten aus</span>
+          <span className="rounded-2xl bg-bubble px-3 py-2 text-sm text-white">{t("settings.profile.accentPreview")}</span>
         </div>
         <span className="text-xs text-neutral-500 dark:text-night-muted">
-          Gilt auch für Knöpfe und Schalter in der ganzen App.
+          {t("settings.profile.accentHint")}
         </span>
       </fieldset>
 
       <fieldset className="flex flex-col gap-2 text-sm">
-        <legend className="mb-2 font-medium">Darstellung</legend>
+        <legend className="mb-2 font-medium">{t("settings.profile.appearance")}</legend>
         <div className="inline-flex w-fit rounded-full border border-neutral-300 p-0.5 dark:border-night-border">
           {THEME_OPTIONS.map((option) => (
             <button
@@ -337,7 +338,7 @@ export function ProfileSettings({ profile }: ProfileSettingsProps) {
                 theme === option.value ? "bg-accent text-on-accent" : "text-neutral-600 dark:text-night-muted"
               }`}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>

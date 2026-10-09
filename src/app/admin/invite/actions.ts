@@ -6,11 +6,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import { authCallbackUrl } from "@/lib/site-url";
 import type { MagicLinkState } from "@/lib/auth/magic-link-state";
-import { NETWORK_ERROR_MESSAGE, isNetworkError } from "@/lib/supabase/resilient-fetch";
-
-function errorMessage(error: { message: string }): string {
-  return isNetworkError(error) ? NETWORK_ERROR_MESSAGE : error.message;
-}
+import { isNetworkError } from "@/lib/supabase/resilient-fetch";
+import { setAuthUserLanguage } from "@/lib/auth/user-language";
+import { isLocale } from "@/lib/i18n/config";
+import { getLocale, getT } from "@/lib/i18n/server";
 
 /**
  * Uses the service-role admin client (plain @supabase/supabase-js, not
@@ -33,6 +32,10 @@ export async function inviteUser(
   _prevState: MagicLinkState,
   formData: FormData
 ): Promise<MagicLinkState> {
+  const t = await getT();
+  const errorMessage = (error: { message: string }): string =>
+    isNetworkError(error) ? t("common.networkError") : error.message;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -41,13 +44,17 @@ export async function inviteUser(
   // Re-check server-side — never trust that only the admin can reach this
   // action just because the page redirected non-admins away.
   if (!isAdminEmail(user?.email)) {
-    return { status: "error", message: "Nicht berechtigt." };
+    return { status: "error", message: t("auth.invite.notAllowed") };
   }
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email) {
-    return { status: "error", message: "Bitte eine E-Mail-Adresse eingeben." };
+    return { status: "error", message: t("auth.emailRequired") };
   }
+
+  // Language of the email (and the invitee's initial app language).
+  const languageField = formData.get("language");
+  const language = isLocale(languageField) ? languageField : await getLocale();
 
   const admin = createAdminClient();
   const redirectTo = await authCallbackUrl();
@@ -56,18 +63,20 @@ export async function inviteUser(
   // record it before sending, so the link works the moment it arrives.
   const { error: inviteError } = await admin
     .from("invites")
-    .upsert({ email, invited_by: user!.id }, { onConflict: "email", ignoreDuplicates: true });
+    .upsert({ email, invited_by: user!.id, language }, { onConflict: "email" });
   if (inviteError) {
     return { status: "error", message: errorMessage(inviteError) };
   }
 
+  // `data` lands in user_metadata.language, which the invite template reads.
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
+    data: { language },
   });
 
   if (!error) {
     revalidatePath("/");
-    return { status: "sent", message: `Einladung an ${email} verschickt.` };
+    return { status: "sent", message: t("auth.invite.sent", { email }) };
   }
 
   if (!error.message.toLowerCase().includes("already been registered")) {
@@ -76,7 +85,10 @@ export async function inviteUser(
 
   // Already has an account (e.g. an earlier invite they never opened) — fall
   // back to a fresh sign-in link instead of a dead end. Still via the admin
-  // client, so this also completes via the implicit flow.
+  // client, so this also completes via the implicit flow. GoTrue ignores
+  // `data` for existing users, so set the language on the account first —
+  // the recovery template reads user_metadata.language.
+  await setAuthUserLanguage(admin, email, language, { paginate: true });
   const { error: resendError } = await admin.auth.resetPasswordForEmail(email, {
     redirectTo,
   });
@@ -88,6 +100,6 @@ export async function inviteUser(
   revalidatePath("/");
   return {
     status: "sent",
-    message: `${email} hat schon einen Account — neuen Anmeldelink verschickt.`,
+    message: t("auth.invite.alreadyRegistered", { email }),
   };
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { getT } from "@/lib/i18n/server";
 import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
 import { MEMBER_PROFILE_COLUMNS, displayNameOf, type MemberProfile } from "@/lib/profile";
 import { loadSchedules } from "@/lib/schedule/schedule";
@@ -14,7 +15,7 @@ interface SchedulePageProps {
 
 export default async function MemberSchedulePage({ params }: SchedulePageProps) {
   const { userId } = await params;
-  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
+  const [supabase, user, t] = await Promise.all([getServerSupabase(), getCurrentUser(), getT()]);
 
   if (!user) {
     redirect("/login");
@@ -29,7 +30,7 @@ export default async function MemberSchedulePage({ params }: SchedulePageProps) 
     .in("id", [user.id, userId]);
   // 22P02 = not even a uuid, a genuine 404.
   if (error && error.code !== "22P02") {
-    throw new Error(`Wochenplan konnte nicht geladen werden: ${error.message}`);
+    throw new Error(t("schedule.loadFailed", { message: error.message }));
   }
   const me = profiles?.find((p) => p.id === user.id) as MemberProfile | undefined;
   const owner = profiles?.find((p) => p.id === userId) as MemberProfile | undefined;
@@ -46,11 +47,11 @@ export default async function MemberSchedulePage({ params }: SchedulePageProps) 
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <SessionWatcher />
-      <ThemeSync theme={me.theme} accent={me.accent_color} />
+      <ThemeSync theme={me.theme} accent={me.accent_color} language={me.language} />
       <div className="flex items-center gap-3">
         <Link
           href="/"
-          aria-label="Zurück"
+          aria-label={t("schedule.back")}
           className="text-neutral-400 hover:text-neutral-600 dark:text-night-muted dark:hover:text-night-text"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -58,13 +59,13 @@ export default async function MemberSchedulePage({ params }: SchedulePageProps) 
           </svg>
         </Link>
         <Avatar profile={owner} size="sm" />
-        <h1 className="min-w-0 truncate text-lg font-semibold">Woche von {displayNameOf(owner)}</h1>
+        <h1 className="min-w-0 truncate text-lg font-semibold">{t("schedule.weekOf", { name: displayNameOf(owner) })}</h1>
       </div>
       {schedule ? (
         <ScheduleView schedule={schedule} ownerName={displayNameOf(owner)} />
       ) : (
         <p className="rounded-2xl border border-neutral-200 p-4 text-sm text-neutral-600 dark:border-night-border dark:bg-night-surface dark:text-night-muted">
-          {displayNameOf(owner)} hat (noch) keinen Wochenplan, den du sehen kannst.
+          {t("schedule.noPlan", { name: displayNameOf(owner) })}
         </p>
       )}
     </main>

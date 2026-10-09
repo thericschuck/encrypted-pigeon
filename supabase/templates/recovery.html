@@ -1,15 +1,21 @@
 <!-- Supabase Auth → Email Templates → "Reset Password"
-     Betreff: Dein neuer Anmeldelink für Encrypted Pigeon
      Ausgelöst von: src/app/admin/invite/actions.ts (resetPasswordForEmail) —
      wird nur als erneuter Einladungs-/Anmeldelink für bestehende Accounts
-     genutzt, NICHT zum Passwort-Ändern. Daher bewusst ohne "Passwort"-Text. -->
+     genutzt, NICHT zum Passwort-Ändern. Daher bewusst ohne "Passwort"-Text.
+     Sprache: user_metadata.language (de|en|fr|zh, sonst Deutsch).
+     Betreff (kann hier nicht bedingt sein — wird per scripts/apply-email-templates.mjs gesetzt):
+       de: Dein neuer Anmeldelink für Encrypted Pigeon
+       en: Your new sign-in link for Encrypted Pigeon
+       fr: Ton nouveau lien de connexion pour Encrypted Pigeon
+       zh: 你的 Encrypted Pigeon 新登录链接 -->
+{{ $lang := "" }}{{ with .Data.language }}{{ $lang = . }}{{ end }}
 <!DOCTYPE html>
-<html lang="de">
+<html lang="{{ if eq $lang "en" }}en{{ else if eq $lang "fr" }}fr{{ else if eq $lang "zh" }}zh-CN{{ else }}de{{ end }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light only" />
-    <title>Neuer Anmeldelink für Encrypted Pigeon</title>
+    <title>{{ if eq $lang "en" }}New sign-in link for Encrypted Pigeon{{ else if eq $lang "fr" }}Nouveau lien de connexion pour Encrypted Pigeon{{ else if eq $lang "zh" }}Encrypted Pigeon 新登录链接{{ else }}Neuer Anmeldelink für Encrypted Pigeon{{ end }}</title>
   </head>
   <body style="margin:0; padding:0; background-color:#f7f0df;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f7f0df;">
@@ -22,31 +28,31 @@
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 32px 0 32px; font-family:Arial, Helvetica, sans-serif; color:#171717;">
-                <h1 style="margin:0 0 16px 0; font-size:22px; line-height:1.3; font-weight:bold;">Dein neuer Anmeldelink</h1>
+              <td style="padding:8px 32px 0 32px; font-family:Arial, Helvetica, 'PingFang SC', 'Microsoft YaHei', sans-serif; color:#171717;">
+                <h1 style="margin:0 0 16px 0; font-size:22px; line-height:1.3; font-weight:bold;">{{ if eq $lang "en" }}Your new sign-in link{{ else if eq $lang "fr" }}Ton nouveau lien de connexion{{ else if eq $lang "zh" }}你的新登录链接{{ else }}Dein neuer Anmeldelink{{ end }}</h1>
                 <p style="margin:0 0 16px 0; font-size:16px; line-height:1.5;">
-                  Hallo,<br />
-                  du wurdest erneut zu <strong>Encrypted Pigeon</strong> eingeladen. Da du schon einen Account hast, kannst du dich einfach mit einem Klick anmelden.
+                  {{ if eq $lang "en" }}Hi,{{ else if eq $lang "fr" }}Bonjour,{{ else if eq $lang "zh" }}你好，{{ else }}Hallo,{{ end }}<br />
+                  {{ if eq $lang "en" }}you've been invited to <strong>Encrypted Pigeon</strong> again. Since you already have an account, you can simply sign in with one click.{{ else if eq $lang "fr" }}tu as de nouveau été invité(e) sur <strong>Encrypted Pigeon</strong>. Comme tu as déjà un compte, tu peux te connecter en un clic.{{ else if eq $lang "zh" }}你再次被邀请加入 <strong>Encrypted Pigeon</strong>。由于你已有账号，只需点击一下即可登录。{{ else }}du wurdest erneut zu <strong>Encrypted Pigeon</strong> eingeladen. Da du schon einen Account hast, kannst du dich einfach mit einem Klick anmelden.{{ end }}
                 </p>
               </td>
             </tr>
             <tr>
               <td align="center" style="padding:8px 32px 24px 32px;">
-                <a href="{{ .ConfirmationURL }}" style="display:inline-block; padding:14px 28px; background-color:#c1643a; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; text-decoration:none; border-radius:8px;">Jetzt anmelden</a>
+                <a href="{{ .ConfirmationURL }}" style="display:inline-block; padding:14px 28px; background-color:#c1643a; color:#ffffff; font-family:Arial, Helvetica, 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size:16px; font-weight:bold; text-decoration:none; border-radius:8px;">{{ if eq $lang "en" }}Sign in now{{ else if eq $lang "fr" }}Se connecter{{ else if eq $lang "zh" }}立即登录{{ else }}Jetzt anmelden{{ end }}</a>
               </td>
             </tr>
             <tr>
-              <td style="padding:0 32px 32px 32px; font-family:Arial, Helvetica, sans-serif; color:#5c4a37; font-size:13px; line-height:1.5;">
-                <p style="margin:0 0 12px 0;">Der Link funktioniert nur einmal und läuft nach kurzer Zeit ab.</p>
-                <p style="margin:0 0 4px 0;">Button funktioniert nicht? Diesen Link in den Browser kopieren:</p>
+              <td style="padding:0 32px 32px 32px; font-family:Arial, Helvetica, 'PingFang SC', 'Microsoft YaHei', sans-serif; color:#5c4a37; font-size:13px; line-height:1.5;">
+                <p style="margin:0 0 12px 0;">{{ if eq $lang "en" }}The link works only once and expires after a short time.{{ else if eq $lang "fr" }}Le lien ne fonctionne qu'une seule fois et expire rapidement.{{ else if eq $lang "zh" }}该链接只能使用一次，并会在短时间内失效。{{ else }}Der Link funktioniert nur einmal und läuft nach kurzer Zeit ab.{{ end }}</p>
+                <p style="margin:0 0 4px 0;">{{ if eq $lang "en" }}Button not working? Copy this link into your browser:{{ else if eq $lang "fr" }}Le bouton ne fonctionne pas ? Copie ce lien dans ton navigateur :{{ else if eq $lang "zh" }}按钮无法使用？请将此链接复制到浏览器中：{{ else }}Button funktioniert nicht? Diesen Link in den Browser kopieren:{{ end }}</p>
                 <p style="margin:0; word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#c1643a;">{{ .ConfirmationURL }}</a></p>
               </td>
             </tr>
           </table>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
             <tr>
-              <td style="padding:16px 32px; font-family:Arial, Helvetica, sans-serif; color:#8a7a62; font-size:12px; line-height:1.5; text-align:center;">
-                Du erwartest diese E-Mail nicht? Dann ignoriere sie einfach – es passiert nichts.
+              <td style="padding:16px 32px; font-family:Arial, Helvetica, 'PingFang SC', 'Microsoft YaHei', sans-serif; color:#8a7a62; font-size:12px; line-height:1.5; text-align:center;">
+                {{ if eq $lang "en" }}Not expecting this email? Just ignore it – nothing will happen.{{ else if eq $lang "fr" }}Tu n'attends pas cet e-mail ? Ignore-le simplement – il ne se passera rien.{{ else if eq $lang "zh" }}没有在等这封邮件？直接忽略即可——不会有任何影响。{{ else }}Du erwartest diese E-Mail nicht? Dann ignoriere sie einfach – es passiert nichts.{{ end }}
               </td>
             </tr>
           </table>

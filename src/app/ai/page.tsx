@@ -61,7 +61,7 @@ export default async function AiPage({ searchParams }: AiPageProps) {
     <main className="flex h-[100dvh] flex-col">
       <SessionWatcher />
       {profile && (
-        <ThemeSync theme={(profile as MemberProfile).theme} accent={(profile as MemberProfile).accent_color} />
+        <ThemeSync theme={(profile as MemberProfile).theme} accent={(profile as MemberProfile).accent_color} language={(profile as MemberProfile).language} />
       )}
       <AiChat
         userId={user.id}

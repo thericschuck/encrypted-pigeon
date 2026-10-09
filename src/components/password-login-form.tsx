@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { useT } from "@/lib/i18n/client";
 import {
   initialMagicLinkState,
   type MagicLinkState,
@@ -18,13 +19,14 @@ interface PasswordLoginFormProps {
 
 function SubmitButton() {
   const { pending } = useFormStatus();
+  const t = useT();
   return (
     <button
       type="submit"
       disabled={pending}
       className="rounded bg-accent px-3 py-2 text-on-accent disabled:opacity-50"
     >
-      {pending ? "Wird angemeldet..." : "Anmelden"}
+      {pending ? t("auth.signingIn") : t("auth.signIn")}
     </button>
   );
 }
@@ -32,6 +34,7 @@ function SubmitButton() {
 export function PasswordLoginForm({ action }: PasswordLoginFormProps) {
   const [state, formAction] = useActionState(action, initialMagicLinkState);
   const router = useRouter();
+  const t = useT();
 
   // The action returns a "redirect" state instead of calling
   // next/navigation's redirect() itself — see the comment in
@@ -51,14 +54,14 @@ export function PasswordLoginForm({ action }: PasswordLoginFormProps) {
         type="email"
         name="email"
         required
-        placeholder="du@example.com"
+        placeholder={t("auth.emailPlaceholder")}
         className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
       />
       <input
         type="password"
         name="password"
         required
-        placeholder="Passwort"
+        placeholder={t("auth.passwordPlaceholder")}
         className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
       />
       <SubmitButton />

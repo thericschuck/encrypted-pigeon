@@ -1,46 +1,60 @@
+import type { TFunction } from "@/lib/i18n/translate";
+
 /**
  * Text pool for <EncryptionBackdrop />, the "hacker" show behind every
  * instant chat message (pigeon letters skip it). Every send picks a random
  * subset of MID_SEQUENCE_LINES (shuffled), then always ends with
- * TRANSMIT_LINES — extend either array for more variety, no component
- * changes needed.
+ * TRANSMIT_LINES — extend either array for more variety (add the message
+ * key to messages/chatMisc.ts), no component changes needed. The texts
+ * are message keys; resolveEncryptionLines() turns them into the viewer's
+ * language.
  */
 export type EncryptionLineKind = "log" | "progress" | "warning" | "success";
 
 export interface EncryptionLineTemplate {
   kind: EncryptionLineKind;
+  /** Message key (chatMisc.enc.*). */
+  key: string;
+}
+
+export interface EncryptionLine {
+  kind: EncryptionLineKind;
   text: string;
 }
 
 export const MID_SEQUENCE_LINES: EncryptionLineTemplate[] = [
-  { kind: "log", text: "> INITIALIZING QUANTUM ENTANGLEMENT MODULE..." },
-  { kind: "progress", text: "ENCRYPTING MESSAGE — AES-256" },
-  { kind: "log", text: "> ROUTING THROUGH 7 PROXIES..." },
-  { kind: "warning", text: "⚠ DEEP PACKET INSPECTION DETECTED — SPOOFING SIGNATURE..." },
-  { kind: "log", text: "> BYPASSING GREAT FIREWALL..." },
-  { kind: "progress", text: "MINING BITCOIN FOR TRANSIT FEE" },
-  { kind: "log", text: "> CRACKING THE BLOCKCHAIN..." },
-  { kind: "log", text: "> ENCRYPTING THE MATRIX..." },
-  { kind: "log", text: "> INJECTING NOISE INTO PACKET HEADERS..." },
-  { kind: "warning", text: "⚠ SURVEILLANCE SATELLITE OVERHEAD — GOING DARK..." },
-  { kind: "log", text: "> NEGOTIATING WITH ROGUE AI..." },
-  { kind: "progress", text: "COMPRESSING PAYLOAD" },
-  { kind: "log", text: "> SPOOFING MAC ADDRESS..." },
-  { kind: "log", text: "> ROTATING ONION LAYERS (x3)..." },
-  { kind: "log", text: "> DOWNLOADING MORE RAM..." },
-  { kind: "log", text: "> CONSULTING THE ORACLE..." },
-  { kind: "log", text: "> HACKING THE MAINFRAME..." },
-  { kind: "warning", text: "⚠ NSA VAN DETECTED OUTSIDE — REROUTING..." },
-  { kind: "progress", text: "GENERATING NOISE ENTROPY" },
-  { kind: "log", text: "> BOUNCING SIGNAL OFF THE MOON..." },
-  { kind: "log", text: "> APPLYING TINFOIL WRAPPER..." },
-  { kind: "log", text: "> LAUNDERING PACKETS THROUGH OFFSHORE SERVER..." },
-  { kind: "progress", text: "SHUFFLING ENTROPY POOL" },
-  { kind: "warning", text: "⚠ GLOBAL-K SATELLITE UPLINK DETECTED — JAMMING..." },
-  { kind: "log", text: "> TRANSLATING TO MORSE CODE AND BACK..." },
+  { kind: "log", key: "chatMisc.enc.m1" },
+  { kind: "progress", key: "chatMisc.enc.m2" },
+  { kind: "log", key: "chatMisc.enc.m3" },
+  { kind: "warning", key: "chatMisc.enc.m4" },
+  { kind: "log", key: "chatMisc.enc.m5" },
+  { kind: "progress", key: "chatMisc.enc.m6" },
+  { kind: "log", key: "chatMisc.enc.m7" },
+  { kind: "log", key: "chatMisc.enc.m8" },
+  { kind: "log", key: "chatMisc.enc.m9" },
+  { kind: "warning", key: "chatMisc.enc.m10" },
+  { kind: "log", key: "chatMisc.enc.m11" },
+  { kind: "progress", key: "chatMisc.enc.m12" },
+  { kind: "log", key: "chatMisc.enc.m13" },
+  { kind: "log", key: "chatMisc.enc.m14" },
+  { kind: "log", key: "chatMisc.enc.m15" },
+  { kind: "log", key: "chatMisc.enc.m16" },
+  { kind: "log", key: "chatMisc.enc.m17" },
+  { kind: "warning", key: "chatMisc.enc.m18" },
+  { kind: "progress", key: "chatMisc.enc.m19" },
+  { kind: "log", key: "chatMisc.enc.m20" },
+  { kind: "log", key: "chatMisc.enc.m21" },
+  { kind: "log", key: "chatMisc.enc.m22" },
+  { kind: "progress", key: "chatMisc.enc.m23" },
+  { kind: "warning", key: "chatMisc.enc.m24" },
+  { kind: "log", key: "chatMisc.enc.m25" },
 ];
 
 export const TRANSMIT_LINES: EncryptionLineTemplate[] = [
-  { kind: "success", text: "> HANDSHAKE WITH RECIPIENT... OK" },
-  { kind: "success", text: "✔ TRANSMITTED." },
+  { kind: "success", key: "chatMisc.enc.t1" },
+  { kind: "success", key: "chatMisc.enc.t2" },
 ];
+
+export function resolveEncryptionLines(templates: EncryptionLineTemplate[], t: TFunction): EncryptionLine[] {
+  return templates.map(({ kind, key }) => ({ kind, text: t(key) }));
+}

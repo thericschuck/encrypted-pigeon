@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { isIOS } from "@/lib/device";
 import { promptInstall, useInstallState } from "@/lib/pwa-install";
+import { useT } from "@/lib/i18n/client";
 
 /**
  * "Install as app" in the settings — the permanent home of the one-time
  * <PwaInstallPrompt /> nudge. Hidden once the app runs installed.
  */
 export function InstallAppSettings() {
+  const t = useT();
   const { deferredPrompt, installed } = useInstallState();
   const [busy, setBusy] = useState(false);
   // Installed-or-not is only known in the browser; render nothing until
@@ -26,10 +28,9 @@ export function InstallAppSettings() {
 
   return (
     <div className="rounded-xl border border-neutral-200 p-4 dark:border-night-border dark:bg-night-surface">
-      <h2 className="text-sm font-semibold text-neutral-900 dark:text-night-text">Als App installieren</h2>
+      <h2 className="text-sm font-semibold text-neutral-900 dark:text-night-text">{t("settings.install.title")}</h2>
       <p className="mt-1 text-sm text-neutral-500 dark:text-night-muted">
-        Eigenes Icon auf dem Home-Bildschirm, Vollbild ohne Browserleiste — und auf dem iPhone die
-        Voraussetzung für Benachrichtigungen.
+        {t("settings.install.description")}
       </p>
 
       <div className="mt-3">
@@ -40,19 +41,23 @@ export function InstallAppSettings() {
             disabled={busy}
             className="rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent disabled:opacity-50"
           >
-            {busy ? "Einen Moment…" : "🕊️ App installieren"}
+            {busy ? t("settings.busy") : t("settings.install.button")}
           </button>
         ) : isIOS() ? (
           <p className="text-sm text-neutral-500 dark:text-night-muted">
-            In Safari unten auf <span className="font-medium">Teilen</span> tippen, dann auf{" "}
-            <span className="font-medium">„Zum Home-Bildschirm“</span>.
+            {t("settings.install.iosBefore")}
+            <span className="font-medium">{t("settings.install.iosShare")}</span>
+            {t("settings.install.iosMiddle")}
+            <span className="font-medium">{t("settings.install.iosAdd")}</span>
+            {t("settings.install.iosAfter")}
           </p>
         ) : (
           <p className="text-sm text-neutral-500 dark:text-night-muted">
-            Öffne das Menü deines Browsers (⋮) und wähle{" "}
-            <span className="font-medium">„App installieren“</span> bzw.{" "}
-            <span className="font-medium">„Zum Startbildschirm hinzufügen“</span>. Falls der Eintrag
-            fehlt, unterstützt dieser Browser keine Installation — in Chrome oder Edge klappt es.
+            {t("settings.install.menuBefore")}
+            <span className="font-medium">{t("settings.install.menuInstall")}</span>
+            {t("settings.install.menuOr")}
+            <span className="font-medium">{t("settings.install.menuAddHome")}</span>
+            {t("settings.install.menuAfter")}
           </p>
         )}
       </div>

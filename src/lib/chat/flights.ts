@@ -4,6 +4,9 @@ import type { PigeonFlightStatus } from "@/lib/supabase/types";
 // supabase/functions/start-pigeon-flight.
 export interface FlightEvent {
   type: string;
+  /** Stable variant id ("customs.1"); missing on flights created before it existed. */
+  key?: string;
+  /** German text as stored; shown only when the key is unknown (see pigeonEventLabel). */
   label: string;
   emoji: string;
   timestamp_offset_seconds: number;

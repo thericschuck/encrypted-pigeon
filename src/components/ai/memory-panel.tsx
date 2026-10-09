@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "@/lib/i18n/client";
 import { createClient } from "@/lib/supabase/client";
 import { AI_MAX_INSTRUCTIONS_CHARS, AI_MAX_MEMORY_CHARS } from "@/lib/ai/protocol";
 
@@ -11,11 +12,6 @@ export interface AiMemory {
 
 const INPUT =
   "w-full rounded-xl border border-neutral-300 px-3 py-2 text-base focus:border-accent focus:outline-none sm:text-sm dark:border-night-border dark:bg-night-surface";
-
-const INSTRUCTIONS_PLACEHOLDER = `z.B.
-- Antworte kurz und direkt.
-- Chinesisch immer mit Schriftzeichen und Pinyin.
-- Preise in ¥ und ungefähr in €.`;
 
 interface MemoryPanelProps {
   userId: string;
@@ -38,6 +34,7 @@ export function MemoryPanel({
   onMemoriesChange,
   onClose,
 }: MemoryPanelProps) {
+  const t = useT();
   const [draftInstructions, setDraftInstructions] = useState(instructions);
   const [newMemory, setNewMemory] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,7 +46,7 @@ export function MemoryPanel({
     setError(null);
     const { error: failure } = await action();
     setBusy(false);
-    if (failure) setError(`Speichern fehlgeschlagen: ${failure.message}`);
+    if (failure) setError(t("ai.memory.saveFailed", { message: failure.message }));
     return !failure;
   }
 
@@ -109,11 +106,11 @@ export function MemoryPanel({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold">🧠 Gedächtnis & Anweisungen</h2>
+          <h2 className="text-base font-semibold">{t("ai.memory.heading")}</h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Schließen"
+            aria-label={t("ai.memory.close")}
             className="rounded-full p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -130,14 +127,13 @@ export function MemoryPanel({
 
         <section className="flex flex-col gap-2">
           <div>
-            <h3 className="text-sm font-semibold">Gedächtnis</h3>
+            <h3 className="text-sm font-semibold">{t("ai.memory.section")}</h3>
             <p className="text-xs text-neutral-500 dark:text-night-muted">
-              Fakten über dich, die der Assistent immer kennt, z.B. wo du bist, was du machst, was du magst oder
-              verträgst.
+              {t("ai.memory.sectionHint")}
             </p>
           </div>
           {memories.length === 0 && (
-            <p className="text-xs italic text-neutral-400 dark:text-night-muted">Noch nichts gespeichert.</p>
+            <p className="text-xs italic text-neutral-400 dark:text-night-muted">{t("ai.memory.empty")}</p>
           )}
           <ul className="flex flex-col gap-1.5">
             {memories.map((memory) => (
@@ -153,7 +149,7 @@ export function MemoryPanel({
                   type="button"
                   disabled={busy}
                   onClick={() => void deleteMemory(memory)}
-                  aria-label="Eintrag löschen"
+                  aria-label={t("ai.memory.deleteEntry")}
                   className="mt-1.5 flex-shrink-0 rounded-full p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-red-600 dark:text-night-muted dark:hover:bg-night-raised"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
@@ -174,7 +170,7 @@ export function MemoryPanel({
               value={newMemory}
               onChange={(e) => setNewMemory(e.target.value)}
               maxLength={AI_MAX_MEMORY_CHARS}
-              placeholder="z.B. Ich lebe gerade in Dengfeng und trainiere Kung Fu."
+              placeholder={t("ai.memory.placeholder")}
               className={INPUT}
             />
             <button
@@ -189,15 +185,15 @@ export function MemoryPanel({
 
         <section className="flex flex-col gap-2">
           <div>
-            <h3 className="text-sm font-semibold">Anweisungen</h3>
-            <p className="text-xs text-neutral-500 dark:text-night-muted">Wie der Assistent antworten soll.</p>
+            <h3 className="text-sm font-semibold">{t("ai.memory.instructions")}</h3>
+            <p className="text-xs text-neutral-500 dark:text-night-muted">{t("ai.memory.instructionsHint")}</p>
           </div>
           <textarea
             value={draftInstructions}
             onChange={(e) => setDraftInstructions(e.target.value)}
             maxLength={AI_MAX_INSTRUCTIONS_CHARS}
             rows={6}
-            placeholder={INSTRUCTIONS_PLACEHOLDER}
+            placeholder={t("ai.memory.instructionsPlaceholder")}
             className={INPUT}
           />
           <div className="flex items-center gap-3">
@@ -207,9 +203,9 @@ export function MemoryPanel({
               onClick={() => void saveInstructions()}
               className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-on-accent disabled:opacity-50"
             >
-              Speichern
+              {t("ai.memory.save")}
             </button>
-            {saved && <span className="text-xs text-neutral-500 dark:text-night-muted">Gespeichert ✓</span>}
+            {saved && <span className="text-xs text-neutral-500 dark:text-night-muted">{t("ai.memory.saved")}</span>}
           </div>
         </section>
       </div>

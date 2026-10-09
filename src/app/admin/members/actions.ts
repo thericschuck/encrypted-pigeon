@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import { AVATAR_BUCKET } from "@/lib/profile";
+import { getT } from "@/lib/i18n/server";
 import { CHAT_IMAGE_BUCKET, CHAT_VIDEO_BUCKET, CHAT_VOICE_BUCKET } from "@/lib/chat/buckets";
 
 export type AdminActionResult = { status: "ok"; message: string } | { status: "error"; message: string };
@@ -31,10 +32,11 @@ async function requireAdmin(): Promise<{ id: string } | null> {
  * email again later works as usual.
  */
 export async function deleteMember(userId: string): Promise<AdminActionResult> {
+  const t = await getT();
   const actor = await requireAdmin();
-  if (!actor) return { status: "error", message: "Nicht berechtigt." };
+  if (!actor) return { status: "error", message: t("dashboard.notAllowed") };
   if (!userId || userId === actor.id) {
-    return { status: "error", message: "Das eigene Konto kann hier nicht gelöscht werden." };
+    return { status: "error", message: t("dashboard.cannotDeleteSelf") };
   }
 
   const admin = createAdminClient();
@@ -44,7 +46,7 @@ export async function deleteMember(userId: string): Promise<AdminActionResult> {
     .eq("id", userId)
     .maybeSingle();
   if (profileError) return { status: "error", message: profileError.message };
-  if (!profile) return { status: "error", message: "Mitglied nicht gefunden." };
+  if (!profile) return { status: "error", message: t("dashboard.memberNotFound") };
 
   // Everything stored in the chats that are about to go away.
   const { data: participantRows, error: participantsError } = await admin
@@ -77,11 +79,11 @@ export async function deleteMember(userId: string): Promise<AdminActionResult> {
   // half-deleted member.
   if (chatIds.length > 0) {
     const { error } = await admin.from("chats").delete().in("id", chatIds);
-    if (error) return { status: "error", message: `Chats konnten nicht gelöscht werden: ${error.message}` };
+    if (error) return { status: "error", message: t("dashboard.chatsDeleteFailed", { error: error.message }) };
   }
   const { error: deleteProfileError } = await admin.from("profiles").delete().eq("id", userId);
   if (deleteProfileError) {
-    return { status: "error", message: `Profil konnte nicht gelöscht werden: ${deleteProfileError.message}` };
+    return { status: "error", message: t("dashboard.profileDeleteFailed", { error: deleteProfileError.message }) };
   }
   await admin.from("invites").delete().eq("email", profile.email.toLowerCase());
 
@@ -105,15 +107,16 @@ export async function deleteMember(userId: string): Promise<AdminActionResult> {
     status: "ok",
     message:
       storageFailures.length > 0
-        ? `${profile.email} gelöscht (einige Dateien konnten nicht entfernt werden).`
-        : `${profile.email} gelöscht.`,
+        ? t("dashboard.deletedPartial", { email: profile.email })
+        : t("dashboard.deleted", { email: profile.email }),
   };
 }
 
 /** Withdraws an invite that hasn't been accepted yet. */
 export async function withdrawInvite(email: string): Promise<AdminActionResult> {
+  const t = await getT();
   const actor = await requireAdmin();
-  if (!actor) return { status: "error", message: "Nicht berechtigt." };
+  if (!actor) return { status: "error", message: t("dashboard.notAllowed") };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -124,5 +127,5 @@ export async function withdrawInvite(email: string): Promise<AdminActionResult> 
   if (error) return { status: "error", message: error.message };
 
   revalidatePath("/");
-  return { status: "ok", message: `Einladung für ${email} zurückgezogen.` };
+  return { status: "ok", message: t("dashboard.inviteWithdrawn", { email }) };
 }

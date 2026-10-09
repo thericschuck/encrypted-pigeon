@@ -13,23 +13,14 @@ export interface SoundSettings {
   sounds: Record<SoundKey, boolean>;
 }
 
-export const SOUND_OPTIONS: { key: SoundKey; label: string; description: string }[] = [
-  {
-    key: "send",
-    label: "Senden",
-    description: "Terminal-Piepen, wenn die Verschlüsselung einer Nachricht startet.",
-  },
-  {
-    key: "encrypted",
-    label: "Verschlüsselt & übertragen",
-    description: "Abschluss-Ton, wenn die Hacker-Show einer Nachricht fertig ist.",
-  },
-  {
-    key: "takeoff",
-    label: "Taube fliegt los",
-    description: "Wenn du einen Brief per Brieftaube abschickst.",
-  },
-];
+/** Labels/descriptions are message keys (settings.sounds.<key>.label / .description). */
+export const SOUND_OPTIONS: { key: SoundKey; labelKey: string; descriptionKey: string }[] = (
+  ["send", "encrypted", "takeoff"] as const
+).map((key) => ({
+  key,
+  labelKey: `settings.sounds.${key}.label`,
+  descriptionKey: `settings.sounds.${key}.description`,
+}));
 
 const STORAGE_KEY = "pigeon.sound-settings.v1";
 

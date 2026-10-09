@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isIOS, isStandalone } from "@/lib/device";
 import { promptInstall, useInstallState } from "@/lib/pwa-install";
+import { useT } from "@/lib/i18n/client";
 
 const DISMISSED_STORAGE_KEY = "pigeon-pwa-onboarding-dismissed";
 const SHOW_DELAY_MS = 1500;
@@ -17,6 +18,7 @@ const SHOW_DELAY_MS = 1500;
  * button for later).
  */
 export function PwaInstallPrompt() {
+  const t = useT();
   const [visible, setVisible] = useState(false);
   const [hasSession, setHasSession] = useState(false);
   const { deferredPrompt } = useInstallState();
@@ -66,38 +68,40 @@ export function PwaInstallPrompt() {
         <div className="flex items-start gap-3">
           <span className="text-2xl leading-none">🕊️</span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[#5c4a37] dark:text-night-text">App installieren</p>
+            <p className="text-sm font-semibold text-[#5c4a37] dark:text-night-text">{t("settings.pwa.title")}</p>
             {isIOS() ? (
               <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
-                Tippe unten auf <span className="font-medium">Teilen</span> und dann auf{" "}
-                <span className="font-medium">„Zum Home-Bildschirm“</span>, um Encrypted
-                Pigeon wie eine App zu nutzen.
+                {t("settings.pwa.iosBefore")}
+                <span className="font-medium">{t("settings.pwa.iosShare")}</span>
+                {t("settings.pwa.iosMiddle")}
+                <span className="font-medium">{t("settings.pwa.iosAdd")}</span>
+                {t("settings.pwa.iosAfter")}
               </p>
             ) : deferredPrompt ? (
               <>
                 <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
-                  Installiere Encrypted Pigeon für schnelleren Zugriff und Vollbild-Ansicht.
+                  {t("settings.pwa.deferred")}
                 </p>
                 <button
                   type="button"
                   onClick={handleInstallClick}
                   className="mt-2 rounded-full bg-[#c1643a] px-3 py-1.5 text-xs font-medium text-white"
                 >
-                  Jetzt installieren
+                  {t("settings.pwa.installNow")}
                 </button>
               </>
             ) : (
               <p className="mt-1 text-xs text-[#8a7a5c] dark:text-night-muted">
-                Öffne das Menü deines Browsers (⋮) und tippe auf{" "}
-                <span className="font-medium">„App installieren“</span>, um Encrypted Pigeon
-                wie eine App zu nutzen.
+                {t("settings.pwa.menuBefore")}
+                <span className="font-medium">{t("settings.pwa.menuInstall")}</span>
+                {t("settings.pwa.menuAfter")}
               </p>
             )}
           </div>
           <button
             type="button"
             onClick={dismiss}
-            aria-label="Schließen"
+            aria-label={t("settings.pwa.close")}
             className="flex-shrink-0 rounded-full p-1 text-[#8a7a5c] hover:bg-[#ecdfc0] dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">

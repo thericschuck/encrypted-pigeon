@@ -14,29 +14,14 @@ export type NotificationType =
 
 export type NotificationPrefs = Partial<Record<NotificationType, boolean>>;
 
-export const NOTIFICATION_OPTIONS: { type: NotificationType; label: string; description: string }[] = [
-  { type: "chat", label: "Neue Nachrichten", description: "Normale Chat-Nachrichten, mit Vorschau." },
-  {
-    type: "letter_incoming",
-    label: "Taube im Anflug",
-    description: "Jemand hat dir einen Brief geschickt, die Taube ist unterwegs.",
-  },
-  {
-    type: "letter_arrived",
-    label: "Brief angekommen",
-    description: "Ein Brief an dich ist gelandet und kann gelesen werden.",
-  },
-  {
-    type: "own_arrived",
-    label: "Deine Taube ist angekommen",
-    description: "Dein eigener Brief wurde zugestellt.",
-  },
-  {
-    type: "incident",
-    label: "Zwischenfälle unterwegs",
-    description: "Höchstens einer pro Flug, z. B. Gegenwind oder ein Falke.",
-  },
-];
+/** Labels/descriptions are message keys (settings.push.type.<type>.label / .description). */
+export const NOTIFICATION_OPTIONS: { type: NotificationType; labelKey: string; descriptionKey: string }[] = (
+  ["chat", "letter_incoming", "letter_arrived", "own_arrived", "incident"] as const
+).map((type) => ({
+  type,
+  labelKey: `settings.push.type.${type}.label`,
+  descriptionKey: `settings.push.type.${type}.description`,
+}));
 
 export function isNotificationEnabled(prefs: NotificationPrefs, type: NotificationType): boolean {
   return prefs[type] !== false;

@@ -7,6 +7,8 @@
 // or it silently resolves to `never` and every .from(...) call collapses to
 // `never` with no error at the call site, only at every usage downstream.
 
+import type { Locale } from "@/lib/i18n/config";
+
 export type PigeonFlightStatus = "encrypting" | "in_transit" | "delivered";
 export type MessageKind = "chat" | "pigeon";
 export type ThemePreference = "system" | "light" | "dark";
@@ -25,6 +27,8 @@ export interface Database {
           // Path inside the pigeon-avatars bucket ("{id}/{file}"), not a URL.
           avatar_url: string | null;
           theme: ThemePreference;
+          // UI language (lib/i18n/config.ts); also used for push notifications and emails.
+          language: Locale;
           accent_color: string | null;
           pigeon_name: string | null;
           // { [type]: false } switches a push type off (lib/push/notification-prefs.ts).
@@ -43,6 +47,7 @@ export interface Database {
           display_name?: string | null;
           avatar_url?: string | null;
           theme?: ThemePreference;
+          language?: Locale;
           accent_color?: string | null;
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
@@ -57,6 +62,7 @@ export interface Database {
           display_name?: string | null;
           avatar_url?: string | null;
           theme?: ThemePreference;
+          language?: Locale;
           accent_color?: string | null;
           pigeon_name?: string | null;
           notification_prefs?: Record<string, boolean>;
@@ -196,18 +202,21 @@ export interface Database {
           invited_by: string | null;
           created_at: string;
           accepted_at: string | null;
+          language: Locale | null;
         };
         Insert: {
           email: string;
           invited_by?: string | null;
           created_at?: string;
           accepted_at?: string | null;
+          language?: Locale | null;
         };
         Update: {
           email?: string;
           invited_by?: string | null;
           created_at?: string;
           accepted_at?: string | null;
+          language?: Locale | null;
         };
         Relationships: [];
       };

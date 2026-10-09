@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { FlightRow } from "@/lib/chat/flights";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT } from "@/lib/i18n/client";
 
 interface PigeonStatusBadgeProps {
   /** undefined = no flight row (yet); see `loading` for "still fetching". */
@@ -22,12 +23,13 @@ interface PigeonStatusBadgeProps {
  * was away" purely from what this component happens to observe — no
  * persisted "seen" state needed. If it sees the live in_transit->delivered
  * transition (or a very recent arrival right after mount), it briefly
- * highlights as "Gerade angekommen"; stale arrivals are just a plain badge.
+ * highlights as "just arrived"; stale arrivals are just a plain badge.
  */
 const RECENT_ARRIVAL_WINDOW_MS = 2 * 60 * 1000;
 const JUST_ARRIVED_HIGHLIGHT_MS = 4000;
 
 export function PigeonStatusBadge({ flight, loading, onOpen }: PigeonStatusBadgeProps) {
+  const t = useT();
   const status = flight?.status ?? null;
   const [justArrived, setJustArrived] = useState(false);
   // null until the first known status, so the first observation can be
@@ -67,13 +69,13 @@ export function PigeonStatusBadge({ flight, loading, onOpen }: PigeonStatusBadge
   // No row yet: the server-side start-pigeon-flight call is usually only a
   // beat behind the letter itself.
   if (!status || status === "encrypting") {
-    return <span className="text-xs opacity-60">🕊 Macht sich startklar…</span>;
+    return <span className="text-xs opacity-60">🕊 {t("chatMisc.badge.preparing")}</span>;
   }
 
   if (status === "in_transit") {
     return (
       <button type="button" onClick={onOpen} className={linkClass}>
-        🕊 Unterwegs · Flug ansehen
+        🕊 {t("chatMisc.badge.inTransit")}
       </button>
     );
   }
@@ -88,7 +90,7 @@ export function PigeonStatusBadge({ flight, loading, onOpen }: PigeonStatusBadge
         justArrived ? "bg-amber-100 dark:bg-amber-900/40" : ""
       }`}
     >
-      🕊 {justArrived ? "Gerade angekommen" : "Angekommen"}
+      🕊 {justArrived ? t("chatMisc.badge.justArrived") : t("chatMisc.badge.arrived")}
     </motion.button>
   );
 }

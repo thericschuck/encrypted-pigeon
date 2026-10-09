@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocale, useT } from "@/lib/i18n/client";
 import { createClient } from "@/lib/supabase/client";
 import type { ScheduleAvailability, ScheduleCategory } from "@/lib/supabase/types";
 import {
@@ -11,7 +12,10 @@ import {
   SCHEDULE_BLOCK_COLUMNS,
   SCHEDULE_CATEGORIES,
   SLOT_MINUTES,
+  availabilityShortLabel,
+  availabilityLabel,
   blockTitle,
+  categoryLabel,
   type Occurrence,
   type Schedule,
   type ScheduleBlock,
@@ -19,13 +23,13 @@ import {
 } from "@/lib/schedule/schedule";
 import {
   MINUTES_PER_DAY,
-  WEEKDAY_LONG,
-  WEEKDAY_SHORT,
   browserTimeZone,
   formatDayMonth,
   formatMinute,
   mondayOf,
+  weekdayLong,
   weekdayOfKey,
+  weekdayShort,
   zoneLabel,
   zonedParts,
 } from "@/lib/schedule/time";
@@ -90,6 +94,8 @@ interface ScheduleEditorProps {
 
 export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin }: ScheduleEditorProps) {
   const router = useRouter();
+  const t = useT();
+  const locale = useLocale();
   const now = useNow(60_000);
   const [blocks, setBlocks] = useState(initialSchedule.blocks);
   const [exceptions, setExceptions] = useState(initialSchedule.exceptions);
@@ -139,7 +145,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
       changedRef.current = true;
       return true;
     } catch (e) {
-      setError(`Speichern fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`);
+      setError(t("schedule.editor.saveFailed", { message: e instanceof Error ? e.message : String(e) }));
       return false;
     } finally {
       setBusy(false);
@@ -186,7 +192,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
   async function saveDraft() {
     if (!draft || !slot) return;
     if (draft.start === draft.end) {
-      setError("Start und Ende dürfen nicht gleich sein.");
+      setError(t("schedule.editor.sameStartEnd"));
       return;
     }
     const fields = {
@@ -332,7 +338,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
     <div className="flex flex-col gap-4">
       <section className={`${CARD} flex flex-col gap-3`}>
         <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Zeitzone deines Plans</span>
+          <span className="text-sm font-medium">{t("schedule.editor.zoneLabel")}</span>
           <select value={timezone} onChange={(e) => void changeTimezone(e.target.value)} disabled={busy} className={INPUT}>
             {zones.map((zone) => (
               <option key={zone} value={zone}>
@@ -341,30 +347,30 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
             ))}
           </select>
           <span className="text-xs text-neutral-500 dark:text-night-muted">
-            Du trägst alle Zeiten in dieser Zone ein. Die anderen sehen sie automatisch in ihrer eigenen Zeit.
+            {t("schedule.editor.zoneHint")}
           </span>
         </label>
         {deviceZone && deviceZone !== timezone && (
           <p className="text-xs text-neutral-500 dark:text-night-muted">
-            Dein Gerät steht auf {zoneLabel(deviceZone)}.{" "}
+            {t("schedule.editor.deviceZone", { zone: zoneLabel(deviceZone) })}{" "}
             <button type="button" onClick={() => void changeTimezone(deviceZone)} className="underline">
-              Übernehmen
+              {t("schedule.editor.applyZone")}
             </button>
           </p>
         )}
         {isAdmin ? (
           <div className="flex items-center justify-between gap-3 border-t border-neutral-100 pt-3 dark:border-night-border">
             <div>
-              <p className="text-sm font-medium">Für alle Mitglieder sichtbar</p>
+              <p className="text-sm font-medium">{t("schedule.editor.publicLabel")}</p>
               <p className="text-xs text-neutral-500 dark:text-night-muted">
-                Aus: nur du siehst deinen Plan. Die Pläne der anderen siehst du immer.
+                {t("schedule.editor.publicHint")}
               </p>
             </div>
-            <ToggleSwitch checked={isPublic} onChange={(v) => void changePublic(v)} label="Für alle Mitglieder sichtbar" disabled={busy} />
+            <ToggleSwitch checked={isPublic} onChange={(v) => void changePublic(v)} label={t("schedule.editor.publicLabel")} disabled={busy} />
           </div>
         ) : (
           <p className="border-t border-neutral-100 pt-3 text-xs text-neutral-500 dark:border-night-border dark:text-night-muted">
-            {isPublic ? "Alle Mitglieder sehen deinen Plan." : "Deinen Plan sehen nur du und der Admin."}
+            {isPublic ? t("schedule.editor.publicOn") : t("schedule.editor.publicOff")}
           </p>
         )}
       </section>
@@ -372,7 +378,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
       {error && (
         <div className="flex items-start justify-between gap-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
           <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="Hinweis schließen" className="flex-shrink-0">
+          <button type="button" onClick={() => setError(null)} aria-label={t("schedule.editor.closeNotice")} className="flex-shrink-0">
             ✕
           </button>
         </div>
@@ -381,8 +387,8 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
       <div className="flex rounded-full bg-neutral-100 p-0.5 text-sm dark:bg-night-raised">
         {(
           [
-            { value: "week", label: "Normale Woche" },
-            { value: "exceptions", label: "Ausnahmen" },
+            { value: "week", label: t("schedule.editor.tabWeek") },
+            { value: "exceptions", label: t("schedule.editor.tabExceptions") },
           ] as const
         ).map((option) => (
           <button
@@ -405,7 +411,8 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
       {tab === "week" && (
         <section className={`${CARD} flex flex-col gap-3`}>
           <div className="grid grid-cols-7 gap-1">
-            {WEEKDAY_SHORT.map((label, i) => {
+            {Array.from({ length: 7 }, (_, i) => {
+              const label = weekdayShort(i + 1, locale);
               const day = i + 1;
               const count = blocksIn(blocks, { weekday: day }).length;
               return (
@@ -428,7 +435,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
             })}
           </div>
           <DayBlocks
-            title={WEEKDAY_LONG[weekday - 1]}
+            title={weekdayLong(weekday, locale)}
             blocks={blocksIn(blocks, { weekday })}
             editingId={draft?.id ?? null}
             onEdit={editBlock}
@@ -438,7 +445,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={startNewBlock} className={PRIMARY_BUTTON}>
-                + Eintrag
+                {t("schedule.editor.addEntry")}
               </button>
               {blocksIn(blocks, { weekday }).length > 0 && <CopyDay from={weekday} busy={busy} onCopy={copyWeekday} />}
             </div>
@@ -449,8 +456,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
       {tab === "exceptions" && (
         <section className={`${CARD} flex flex-col gap-3`}>
           <p className="text-xs text-neutral-500 dark:text-night-muted">
-            An einem Ausnahme-Tag gilt nur, was du dort einträgst. Die normale Woche wird dann ignoriert, etwa bei
-            Ausflügen, Prüfungen oder freien Tagen.
+            {t("schedule.editor.exceptionsIntro")}
           </p>
           {upcomingExceptions.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -469,7 +475,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
                       : "bg-neutral-100 hover:bg-neutral-200 dark:bg-night-raised dark:hover:bg-night-border"
                   }`}
                 >
-                  {WEEKDAY_SHORT[weekdayOfKey(exception.day) - 1]} {formatDayMonth(exception.day)}
+                  {weekdayShort(weekdayOfKey(exception.day), locale)} {formatDayMonth(exception.day, locale)}
                   {exception.note && ` · ${exception.note}`}
                 </button>
               ))}
@@ -481,7 +487,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
                 }}
                 className="rounded-full px-3 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
               >
-                + Neue Ausnahme
+                {t("schedule.editor.newExceptionLink")}
               </button>
             </div>
           )}
@@ -490,30 +496,33 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
             <>
               <div className="flex flex-col gap-2 border-t border-neutral-100 pt-3 dark:border-night-border">
                 <p className="text-sm font-semibold">
-                  {WEEKDAY_LONG[weekdayOfKey(selectedException.day) - 1]}, {formatDayMonth(selectedException.day)}
+                  {t("schedule.dayDate", {
+                    weekday: weekdayLong(weekdayOfKey(selectedException.day), locale),
+                    date: formatDayMonth(selectedException.day, locale),
+                  })}
                 </p>
                 <input
                   key={selectedException.day}
                   defaultValue={selectedException.note ?? ""}
                   onBlur={(e) => void saveExceptionNote(selectedException, e.target.value)}
-                  placeholder="Notiz, z.B. Ausflug zum Songshan"
+                  placeholder={t("schedule.editor.notePlaceholderTrip")}
                   maxLength={80}
                   className={INPUT}
                 />
               </div>
               <DayBlocks
-                title="Einträge"
+                title={t("schedule.editor.entries")}
                 blocks={blocksIn(blocks, { day: selectedException.day })}
                 editingId={draft?.id ?? null}
                 onEdit={editBlock}
-                emptyText="Keine Einträge, der Tag gilt als frei."
+                emptyText={t("schedule.editor.noEntriesDayFree")}
               />
               {draft ? (
                 <BlockForm draft={draft} onChange={setDraft} onSave={saveDraft} onDelete={deleteDraft} onCancel={() => setDraft(null)} busy={busy} />
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={startNewBlock} className={PRIMARY_BUTTON}>
-                    + Eintrag
+                    {t("schedule.editor.addEntry")}
                   </button>
                   <button
                     type="button"
@@ -521,7 +530,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
                     onClick={() => void deleteException(selectedException.day)}
                     className={`${SECONDARY_BUTTON} text-red-600 dark:text-red-400`}
                   >
-                    Ausnahme löschen
+                    {t("schedule.editor.deleteException")}
                   </button>
                 </div>
               )}
@@ -539,7 +548,7 @@ export function ScheduleEditor({ userId, initialSchedule, initialPublic, isAdmin
 
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-          So sieht deine Woche aus ({zoneLabel(timezone)})
+          {t("schedule.editor.weekHeading", { zone: zoneLabel(timezone) })}
         </h2>
         {today ? (
           <WeekGrid
@@ -563,7 +572,7 @@ function DayBlocks({
   blocks,
   editingId,
   onEdit,
-  emptyText = "Noch keine Einträge.",
+  emptyText,
 }: {
   title: string;
   blocks: ScheduleBlock[];
@@ -571,11 +580,12 @@ function DayBlocks({
   onEdit: (block: ScheduleBlock) => void;
   emptyText?: string;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-1">
       <h3 className="text-sm font-semibold">{title}</h3>
       {blocks.length === 0 ? (
-        <p className="text-xs text-neutral-500 dark:text-night-muted">{emptyText}</p>
+        <p className="text-xs text-neutral-500 dark:text-night-muted">{emptyText ?? t("schedule.editor.noEntries")}</p>
       ) : (
         <ul className="flex flex-col gap-1">
           {blocks.map((block) => {
@@ -594,10 +604,10 @@ function DayBlocks({
                     {block.end_minute <= block.start_minute && <sup> +1</sup>}
                   </span>
                   <span className="min-w-0 flex-1 truncate">
-                    {category.emoji} {blockTitle(block)}
+                    {category.emoji} {blockTitle(block, t)}
                   </span>
                   <span
-                    title={AVAILABILITY_INFO[block.availability].label}
+                    title={availabilityLabel(t, block.availability)}
                     className={`h-2 w-2 flex-shrink-0 rounded-full ${AVAILABILITY_INFO[block.availability].dotClass}`}
                   />
                 </button>
@@ -625,6 +635,7 @@ function BlockForm({
   onCancel: () => void;
   busy: boolean;
 }) {
+  const t = useT();
   const wraps = draft.end <= draft.start;
 
   return (
@@ -644,7 +655,7 @@ function BlockForm({
                 active ? category.blockClass : "border-neutral-200 bg-white dark:border-night-border dark:bg-night-surface"
               }`}
             >
-              {category.emoji} {category.label}
+              {category.emoji} {categoryLabel(t, value)}
             </button>
           );
         })}
@@ -652,7 +663,7 @@ function BlockForm({
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <label className="flex items-center gap-1.5">
-          Von
+          {t("schedule.editor.from")}
           <select value={draft.start} onChange={(e) => onChange({ ...draft, start: Number(e.target.value) })} className={INPUT}>
             {SLOT_OPTIONS.map((m) => (
               <option key={m} value={m}>
@@ -662,7 +673,7 @@ function BlockForm({
           </select>
         </label>
         <label className="flex items-center gap-1.5">
-          bis
+          {t("schedule.editor.to")}
           <select value={draft.end} onChange={(e) => onChange({ ...draft, end: Number(e.target.value) })} className={INPUT}>
             {SLOT_OPTIONS.map((m) => (
               <option key={m} value={m}>
@@ -672,12 +683,12 @@ function BlockForm({
           </select>
         </label>
         {wraps && draft.end !== draft.start && (
-          <span className="text-xs text-neutral-500 dark:text-night-muted">endet am nächsten Tag</span>
+          <span className="text-xs text-neutral-500 dark:text-night-muted">{t("schedule.editor.endsNextDay")}</span>
         )}
       </div>
 
       <div className="flex flex-col gap-1">
-        <span className="text-xs text-neutral-500 dark:text-night-muted">Erreichbarkeit</span>
+        <span className="text-xs text-neutral-500 dark:text-night-muted">{t("schedule.editor.availability")}</span>
         <div className="flex rounded-full bg-white p-0.5 text-xs dark:bg-night-surface">
           {AVAILABILITY_ORDER.map((value) => (
             <button
@@ -692,7 +703,7 @@ function BlockForm({
               }`}
             >
               <span aria-hidden="true" className={`h-2 w-2 rounded-full ${AVAILABILITY_INFO[value].dotClass}`} />
-              {value === "available" ? "erreichbar" : value === "limited" ? "eingeschränkt" : "nicht erreichbar"}
+              {availabilityShortLabel(t, value)}
             </button>
           ))}
         </div>
@@ -701,21 +712,21 @@ function BlockForm({
       <input
         value={draft.label}
         onChange={(e) => onChange({ ...draft, label: e.target.value })}
-        placeholder={`Bezeichnung (optional), sonst „${SCHEDULE_CATEGORIES[draft.category].label}“`}
+        placeholder={t("schedule.editor.labelPlaceholder", { category: categoryLabel(t, draft.category) })}
         maxLength={60}
         className={INPUT}
       />
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={onSave} disabled={busy} className={PRIMARY_BUTTON}>
-          {busy ? "Speichert…" : "Speichern"}
+          {busy ? t("schedule.editor.saving") : t("schedule.editor.save")}
         </button>
         <button type="button" onClick={onCancel} disabled={busy} className={SECONDARY_BUTTON}>
-          Abbrechen
+          {t("schedule.editor.cancel")}
         </button>
         {draft.id && (
           <button type="button" onClick={onDelete} disabled={busy} className={`${SECONDARY_BUTTON} ml-auto text-red-600 dark:text-red-400`}>
-            Löschen
+            {t("schedule.editor.delete")}
           </button>
         )}
       </div>
@@ -724,13 +735,15 @@ function BlockForm({
 }
 
 function CopyDay({ from, busy, onCopy }: { from: number; busy: boolean; onCopy: (targets: number[]) => Promise<boolean> }) {
+  const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState<number[]>([]);
 
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className={SECONDARY_BUTTON}>
-        Tag kopieren…
+        {t("schedule.editor.copyDay")}
       </button>
     );
   }
@@ -738,10 +751,11 @@ function CopyDay({ from, busy, onCopy }: { from: number; busy: boolean; onCopy: 
   return (
     <div className="animate-fade-in flex w-full flex-col gap-2 rounded-xl bg-neutral-50 p-3 dark:bg-night-raised">
       <p className="text-xs text-neutral-600 dark:text-night-muted">
-        {WEEKDAY_LONG[from - 1]} übernehmen für (ersetzt die Einträge dort):
+        {t("schedule.editor.copyDayFor", { day: weekdayLong(from, locale) })}
       </p>
       <div className="flex flex-wrap gap-1.5">
-        {WEEKDAY_SHORT.map((label, i) => {
+        {Array.from({ length: 7 }, (_, i) => {
+          const label = weekdayShort(i + 1, locale);
           const day = i + 1;
           if (day === from) return null;
           const active = targets.includes(day);
@@ -750,7 +764,7 @@ function CopyDay({ from, busy, onCopy }: { from: number; busy: boolean; onCopy: 
               key={label}
               type="button"
               aria-pressed={active}
-              onClick={() => setTargets((t) => (active ? t.filter((d) => d !== day) : [...t, day]))}
+              onClick={() => setTargets((current) => (active ? current.filter((d) => d !== day) : [...current, day]))}
               className={`rounded-full px-3 py-1 text-xs ${
                 active ? "bg-accent font-semibold text-on-accent" : "bg-white dark:bg-night-surface"
               }`}
@@ -764,7 +778,7 @@ function CopyDay({ from, busy, onCopy }: { from: number; busy: boolean; onCopy: 
           onClick={() => setTargets([1, 2, 3, 4, 5].filter((d) => d !== from))}
           className="rounded-full px-3 py-1 text-xs text-neutral-500 underline dark:text-night-muted"
         >
-          Mo–Fr
+          {weekdayShort(1, locale)}–{weekdayShort(5, locale)}
         </button>
       </div>
       <div className="flex gap-2">
@@ -779,10 +793,10 @@ function CopyDay({ from, busy, onCopy }: { from: number; busy: boolean; onCopy: 
           }}
           className={PRIMARY_BUTTON}
         >
-          Kopieren
+          {t("schedule.editor.copy")}
         </button>
         <button type="button" onClick={() => setOpen(false)} className={SECONDARY_BUTTON}>
-          Abbrechen
+          {t("schedule.editor.cancel")}
         </button>
       </div>
     </div>
@@ -800,6 +814,7 @@ function NewException({
   busy: boolean;
   onAdd: (day: string, note: string, fromTemplate: boolean) => void;
 }) {
+  const t = useT();
   const [day, setDay] = useState("");
   const [note, setNote] = useState("");
   const [fromTemplate, setFromTemplate] = useState(true);
@@ -807,22 +822,22 @@ function NewException({
 
   return (
     <div className="flex flex-col gap-2 border-t border-neutral-100 pt-3 dark:border-night-border">
-      <h3 className="text-sm font-semibold">Neue Ausnahme</h3>
+      <h3 className="text-sm font-semibold">{t("schedule.editor.newException")}</h3>
       <div className="flex flex-wrap gap-2">
         <input type="date" value={day} min={minDay ?? undefined} onChange={(e) => setDay(e.target.value)} className={INPUT} />
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Notiz, z.B. Prüfung"
+          placeholder={t("schedule.editor.notePlaceholderExam")}
           maxLength={80}
           className={`${INPUT} min-w-0 flex-1`}
         />
       </div>
       <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-night-muted">
         <input type="checkbox" checked={fromTemplate} onChange={(e) => setFromTemplate(e.target.checked)} />
-        Mit den normalen Einträgen dieses Wochentags starten
+        {t("schedule.editor.fromTemplate")}
       </label>
-      {duplicate && <p className="text-xs text-red-600 dark:text-red-400">Für diesen Tag gibt es schon eine Ausnahme.</p>}
+      {duplicate && <p className="text-xs text-red-600 dark:text-red-400">{t("schedule.editor.duplicateException")}</p>}
       <div>
         <button
           type="button"
@@ -830,7 +845,7 @@ function NewException({
           onClick={() => onAdd(day, note, fromTemplate)}
           className={PRIMARY_BUTTON}
         >
-          Ausnahme anlegen
+          {t("schedule.editor.createException")}
         </button>
       </div>
     </div>

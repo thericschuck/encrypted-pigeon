@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useLocale, useT } from "@/lib/i18n/client";
 import {
   AVAILABILITY_INFO,
   SCHEDULE_CATEGORIES,
+  availabilityLabel,
   blockTitle,
   exceptionFor,
   segmentsForDay,
   type Occurrence,
   type Schedule,
 } from "@/lib/schedule/schedule";
-import { MINUTES_PER_DAY, WEEKDAY_SHORT, addDays, formatDayMonth, zonedParts } from "@/lib/schedule/time";
+import { MINUTES_PER_DAY, addDays, formatDayMonth, weekdayShort, zonedParts } from "@/lib/schedule/time";
 
 const HOUR_PX = 32;
 const GRID_HEIGHT = 24 * HOUR_PX;
@@ -31,6 +33,8 @@ interface WeekGridProps {
 
 /** Mo–So with every block placed at its time in `displayZone`. */
 export function WeekGrid({ schedule, displayZone, weekStart, now, selectedBlockId, onSelect }: WeekGridProps) {
+  const t = useT();
+  const locale = useLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const nowParts = now ? zonedParts(now, displayZone) : null;
@@ -57,16 +61,22 @@ export function WeekGrid({ schedule, displayZone, weekStart, now, selectedBlockI
           return (
             <div
               key={day}
-              title={exception ? `Ausnahme${exception.note ? `: ${exception.note}` : ""}` : undefined}
+              title={
+                exception
+                  ? exception.note
+                    ? t("schedule.exceptionWithNote", { note: exception.note })
+                    : t("schedule.exception")
+                  : undefined
+              }
               className={`flex flex-col items-center py-1.5 text-[11px] leading-tight ${
                 isToday ? "font-semibold text-[#b0532b] dark:text-night-accent" : "text-neutral-500 dark:text-night-muted"
               }`}
             >
               <span>
-                {WEEKDAY_SHORT[i]}
-                {exception && <span aria-label="Ausnahme"> ✱</span>}
+                {weekdayShort(i + 1, locale)}
+                {exception && <span aria-label={t("schedule.exception")}> ✱</span>}
               </span>
-              <span className="text-[10px] opacity-80">{formatDayMonth(day)}</span>
+              <span className="text-[10px] opacity-80">{formatDayMonth(day, locale)}</span>
             </div>
           );
         })}
@@ -109,7 +119,7 @@ export function WeekGrid({ schedule, displayZone, weekStart, now, selectedBlockI
                       key={`${block.id}-${segment.occurrence.start.getTime()}`}
                       type="button"
                       onClick={() => onSelect?.(segment.occurrence)}
-                      title={`${category.emoji} ${blockTitle(block)} · ${AVAILABILITY_INFO[block.availability].label}`}
+                      title={`${category.emoji} ${blockTitle(block, t)} · ${availabilityLabel(t, block.availability)}`}
                       className={`absolute inset-x-0.5 overflow-hidden border-l-2 px-0.5 text-left text-[10px] leading-tight ${category.blockClass} ${
                         segment.clippedStart ? "rounded-t-none" : "rounded-t-md"
                       } ${segment.clippedEnd ? "rounded-b-none" : "rounded-b-md"} ${
@@ -122,7 +132,7 @@ export function WeekGrid({ schedule, displayZone, weekStart, now, selectedBlockI
                         className={`absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ${AVAILABILITY_INFO[block.availability].dotClass}`}
                       />
                       {height >= 14 && <span className="block">{category.emoji}</span>}
-                      {height >= TITLE_MIN_PX && <span className="block truncate font-medium">{blockTitle(block)}</span>}
+                      {height >= TITLE_MIN_PX && <span className="block truncate font-medium">{blockTitle(block, t)}</span>}
                     </button>
                   );
                 })}

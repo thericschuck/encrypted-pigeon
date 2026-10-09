@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { getT } from "@/lib/i18n/server";
 
 // Alternating bubble widths so the placeholder reads as a conversation.
 const PLACEHOLDER_BUBBLES: { own: boolean; width: string; tall?: boolean }[] = [
@@ -11,9 +12,10 @@ const PLACEHOLDER_BUBBLES: { own: boolean; width: string; tall?: boolean }[] = [
 ];
 
 /** Shown while page.tsx loads participants + chat history on the server. */
-export default function ChatLoading() {
+export default async function ChatLoading() {
+  const t = await getT();
   return (
-    <main className="flex h-[100dvh] flex-col" aria-busy="true" aria-label="Chat wird geladen">
+    <main className="flex h-[100dvh] flex-col" aria-busy="true" aria-label={t("chatMisc.loading.label")}>
       <header className="flex items-center justify-between border-b border-neutral-200 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-night-border">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-5 w-5 rounded-full" />

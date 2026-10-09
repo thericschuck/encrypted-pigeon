@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resumeOutbox } from "@/lib/chat/outbox";
+import { setChatTranslator } from "@/lib/chat/chat-translator";
+import { useT } from "@/lib/i18n/client";
 
 /**
  * Mounted once for the whole app (root layout): after a reload, messages
@@ -10,6 +12,10 @@ import { resumeOutbox } from "@/lib/chat/outbox";
  * page the app opens, not only once that chat is visited again.
  */
 export function OutboxResumer() {
+  const t = useT();
+  // Before the resume effect below, so a resumed send already errors in the right language.
+  setChatTranslator(t);
+
   useEffect(() => {
     createClient()
       .auth.getSession()

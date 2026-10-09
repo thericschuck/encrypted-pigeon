@@ -8,6 +8,7 @@ import {
   requestPushPermissionAndSubscribe,
   subscribeToPush,
 } from "@/lib/push/subscribe";
+import { useT } from "@/lib/i18n/client";
 
 const SEEN_STORAGE_KEY = "pigeon-push-prompt-seen";
 const SHOW_DELAY_MS = 1200;
@@ -27,6 +28,7 @@ interface PushPermissionPromptProps {
  * prompt.
  */
 export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
+  const t = useT();
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"ask" | "ios-hint" | null>(null);
   const [requesting, setRequesting] = useState(false);
@@ -39,7 +41,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
     // isn't subscribed yet (cleared site data, new device, etc).
     if (Notification.permission === "granted") {
       const supabase = createClient();
-      void subscribeToPush(supabase, userId);
+      void subscribeToPush(supabase, userId, t);
       return;
     }
     if (Notification.permission === "denied") return;
@@ -59,6 +61,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
     setMode(wantsIOSHint ? "ios-hint" : "ask");
     const timer = setTimeout(() => setVisible(true), SHOW_DELAY_MS);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   function dismiss() {
@@ -73,7 +76,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
   async function handleEnable() {
     setRequesting(true);
     const supabase = createClient();
-    await requestPushPermissionAndSubscribe(supabase, userId);
+    await requestPushPermissionAndSubscribe(supabase, userId, t);
     setRequesting(false);
     dismiss();
   }
@@ -87,19 +90,17 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
         {mode === "ios-hint" ? (
           <>
             <p className="text-sm font-medium text-neutral-900 dark:text-night-text">
-              Benachrichtigungen auf iPhone/iPad
+              {t("settings.pushPrompt.iosTitle")}
             </p>
             <p className="mt-0.5 text-xs text-neutral-500 dark:text-night-muted">
-              Dafür muss Encrypted Pigeon erst zum Home-Bildschirm hinzugefügt werden (Teilen →
-              „Zum Home-Bildschirm“) — Safari erlaubt Push-Benachrichtigungen nur für installierte
-              Apps.
+              {t("settings.pushPrompt.iosBody")}
             </p>
           </>
         ) : (
           <>
-            <p className="text-sm font-medium text-neutral-900 dark:text-night-text">Benachrichtigungen aktivieren?</p>
+            <p className="text-sm font-medium text-neutral-900 dark:text-night-text">{t("settings.pushPrompt.askTitle")}</p>
             <p className="mt-0.5 text-xs text-neutral-500 dark:text-night-muted">
-              Damit du mitbekommst, wenn deine Taube ankommt oder in Schwierigkeiten gerät.
+              {t("settings.pushPrompt.askBody")}
             </p>
             <button
               type="button"
@@ -107,7 +108,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
               disabled={requesting}
               className="mt-2 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent disabled:opacity-50"
             >
-              {requesting ? "Einen Moment…" : "Aktivieren"}
+              {requesting ? t("settings.busy") : t("settings.push.enable")}
             </button>
           </>
         )}
@@ -115,7 +116,7 @@ export function PushPermissionPrompt({ userId }: PushPermissionPromptProps) {
       <button
         type="button"
         onClick={dismiss}
-        aria-label="Schließen"
+        aria-label={t("settings.pushPrompt.close")}
         className="flex-shrink-0 rounded-full p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:text-night-muted dark:hover:bg-night-raised"
       >
         <svg

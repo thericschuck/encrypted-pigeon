@@ -14,6 +14,7 @@ import {
 } from "@/lib/chat/chat-list-store";
 import { isChatInView } from "@/lib/chat/use-chat-read-state";
 import type { MemberProfile } from "@/lib/profile";
+import { useT } from "@/lib/i18n/client";
 import { ChatList } from "@/components/dashboard/chat-list";
 
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
@@ -68,6 +69,9 @@ interface LiveChatListProps {
  */
 export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale }: LiveChatListProps) {
   const router = useRouter();
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const pathname = usePathname();
   const openChatId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
   const openChatIdRef = useRef(openChatId);
@@ -149,7 +153,7 @@ export function LiveChatList({ userId, chats, membersWithoutChat, media, onStale
       const countsAsUnread = message.sender_id !== userId && !seenLive && !countedIds.has(message.id);
       if (countsAsUnread) countedIds.add(message.id);
       const lastMessage = {
-        preview: previewOf(message),
+        preview: previewOf(message, tRef.current),
         kind: message.kind,
         createdAt: message.created_at,
         fromMe: message.sender_id === userId,

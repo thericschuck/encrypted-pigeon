@@ -1,17 +1,8 @@
+import { LanguageSelect } from "@/components/language-select";
 import { MagicLinkForm } from "@/components/magic-link-form";
 import { PasswordLoginForm } from "@/components/password-login-form";
-import { NETWORK_ERROR_MESSAGE } from "@/lib/supabase/resilient-fetch";
+import { getT } from "@/lib/i18n/server";
 import { sendMagicLink, signInWithPassword } from "./actions";
-
-// ?error=... values set by redirects elsewhere in the app (page.tsx,
-// auth/callback/actions.ts, lib/auth/session-expiry.ts).
-const ERROR_MESSAGES: Record<string, string> = {
-  session_expired: "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.",
-  auth_failed: "Die Anmeldung hat nicht geklappt. Bitte versuche es erneut.",
-  not_invited:
-    "Für diese E-Mail gibt es keine Einladung. Frag die Person, die Encrypted Pigeon betreibt.",
-  network: NETWORK_ERROR_MESSAGE,
-};
 
 interface LoginPageProps {
   searchParams: Promise<{ error?: string }>;
@@ -19,13 +10,23 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { error } = await searchParams;
-  const errorMessage = error
-    ? (ERROR_MESSAGES[error] ?? "Etwas ist schiefgelaufen. Bitte melde dich erneut an.")
-    : null;
+  const t = await getT();
+  // ?error=... values set by redirects elsewhere in the app (page.tsx,
+  // auth/callback/actions.ts, lib/auth/session-expiry.ts).
+  const errorMessages: Record<string, string> = {
+    session_expired: t("auth.login.sessionExpired"),
+    auth_failed: t("auth.login.authFailed"),
+    not_invited: t("auth.notInvited"),
+    network: t("common.networkError"),
+  };
+  const errorMessage = error ? (errorMessages[error] ?? t("auth.login.genericError")) : null;
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-6 px-6">
-      <h1 className="text-2xl font-semibold">🐦 Encrypted Pigeon</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold">🐦 Encrypted Pigeon</h1>
+        <LanguageSelect />
+      </div>
 
       {errorMessage && (
         <p
@@ -37,18 +38,18 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       )}
 
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-neutral-500 dark:text-night-muted">Mit Passwort anmelden.</p>
+        <p className="text-sm text-neutral-500 dark:text-night-muted">{t("auth.login.withPassword")}</p>
         <PasswordLoginForm action={signInWithPassword} />
       </div>
 
       <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 dark:border-night-border">
         <p className="text-sm text-neutral-500 dark:text-night-muted">
-          Oder mit Magic Link: Wir schicken dir einen Anmeldelink per E-Mail.
+          {t("auth.login.orMagicLink")}
         </p>
         <MagicLinkForm
           action={sendMagicLink}
-          submitLabel="Magic Link senden"
-          pendingLabel="Wird gesendet..."
+          submitLabel={t("auth.login.sendMagicLink")}
+          pendingLabel={t("auth.sending")}
         />
       </div>
     </main>

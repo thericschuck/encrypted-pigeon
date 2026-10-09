@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser, getServerSupabase } from "@/lib/auth/current-user";
+import { getT } from "@/lib/i18n/server";
 import { SetPasswordForm } from "./set-password-form";
 
 interface SetPasswordPageProps {
@@ -18,6 +19,7 @@ function safeNext(next: string | undefined): string {
  */
 export default async function SetPasswordPage({ searchParams }: SetPasswordPageProps) {
   const { next } = await searchParams;
+  const t = await getT();
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login?error=auth_failed");
@@ -33,9 +35,9 @@ export default async function SetPasswordPage({ searchParams }: SetPasswordPageP
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-6 px-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">🐦 Willkommen bei Encrypted Pigeon</h1>
+        <h1 className="text-2xl font-semibold">{t("auth.setPassword.title")}</h1>
         <p className="text-sm text-neutral-500 dark:text-night-muted">
-          Leg noch fest, wie du heißt und mit welchem Passwort du dich künftig anmeldest.
+          {t("auth.setPassword.intro")}
         </p>
       </div>
       <SetPasswordForm

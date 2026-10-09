@@ -1,3 +1,5 @@
+import { getT } from "@/lib/i18n/server";
+import type { TFunction } from "@/lib/i18n/translate";
 import type { SourceLanguage, TargetLanguage } from "@/lib/translate/languages";
 
 /**
@@ -8,9 +10,9 @@ import type { SourceLanguage, TargetLanguage } from "@/lib/translate/languages";
 
 export class DeepLError extends Error {}
 
-function apiKey(): string {
+function apiKey(t: TFunction): string {
   const key = process.env.DEEPL_API_KEY;
-  if (!key) throw new DeepLError("Übersetzer ist nicht eingerichtet (DEEPL_API_KEY fehlt).");
+  if (!key) throw new DeepLError(t("translate.error.notConfigured"));
   return key;
 }
 
@@ -19,23 +21,24 @@ function apiBase(key: string): string {
   return key.endsWith(":fx") ? "https://api-free.deepl.com/v2" : "https://api.deepl.com/v2";
 }
 
-function errorForStatus(status: number): string {
+function errorForStatus(status: number, t: TFunction): string {
   switch (status) {
     case 403:
-      return "DeepL hat den API-Key abgelehnt.";
+      return t("translate.error.keyRejected");
     case 429:
-      return "Zu viele Anfragen an DeepL. Bitte kurz warten.";
+      return t("translate.error.rateLimited");
     case 456:
-      return "Das kostenlose DeepL-Kontingent für diesen Monat ist aufgebraucht.";
+      return t("translate.error.quotaExceeded");
     default:
       return status >= 500
-        ? "DeepL ist gerade nicht erreichbar. Bitte später nochmal versuchen."
-        : `Übersetzung fehlgeschlagen (DeepL ${status}).`;
+        ? t("translate.error.unavailable")
+        : t("translate.error.failedStatus", { status });
   }
 }
 
 async function deeplFetch(path: string, init?: RequestInit): Promise<Response> {
-  const key = apiKey();
+  const t = await getT();
+  const key = apiKey(t);
   let response: Response;
   try {
     response = await fetch(`${apiBase(key)}${path}`, {
@@ -48,9 +51,9 @@ async function deeplFetch(path: string, init?: RequestInit): Promise<Response> {
       cache: "no-store",
     });
   } catch {
-    throw new DeepLError("DeepL ist gerade nicht erreichbar. Bitte später nochmal versuchen.");
+    throw new DeepLError(t("translate.error.unavailable"));
   }
-  if (!response.ok) throw new DeepLError(errorForStatus(response.status));
+  if (!response.ok) throw new DeepLError(errorForStatus(response.status, t));
   return response;
 }
 

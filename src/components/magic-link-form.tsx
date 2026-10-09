@@ -2,6 +2,8 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { LOCALES, LOCALE_NAMES } from "@/lib/i18n/config";
+import { useLocale, useT } from "@/lib/i18n/client";
 import {
   initialMagicLinkState,
   type MagicLinkState,
@@ -15,6 +17,8 @@ interface MagicLinkFormProps {
   submitLabel: string;
   pendingLabel: string;
   placeholder?: string;
+  /** Adds a language picker (name="language") — the language of the email that gets sent. */
+  withLanguage?: boolean;
 }
 
 function SubmitButton({
@@ -41,7 +45,10 @@ export function MagicLinkForm({
   submitLabel,
   pendingLabel,
   placeholder,
+  withLanguage,
 }: MagicLinkFormProps) {
+  const t = useT();
+  const locale = useLocale();
   const [state, formAction] = useActionState(action, initialMagicLinkState);
 
   return (
@@ -50,9 +57,25 @@ export function MagicLinkForm({
         type="email"
         name="email"
         required
-        placeholder={placeholder ?? "du@example.com"}
+        placeholder={placeholder ?? t("auth.emailPlaceholder")}
         className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
       />
+      {withLanguage && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-500 dark:text-night-muted">{t("auth.emailLanguageLabel")}</span>
+          <select
+            name="language"
+            defaultValue={locale}
+            className="rounded border border-neutral-300 px-3 py-2 dark:border-night-border"
+          >
+            {LOCALES.map((code) => (
+              <option key={code} value={code}>
+                {LOCALE_NAMES[code]}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <SubmitButton label={submitLabel} pendingLabel={pendingLabel} />
       {state.status !== "idle" && (
         <p

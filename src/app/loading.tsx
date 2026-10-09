@@ -1,11 +1,13 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { getT } from "@/lib/i18n/server";
 
 /** Dashboard placeholder while the chat overview loads on the server. */
-export default function DashboardLoading() {
+export default async function DashboardLoading() {
+  const t = await getT();
   return (
     <main
       aria-busy="true"
-      aria-label="Wird geladen"
+      aria-label={t("system.loading")}
       className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col gap-6 px-4 pt-[max(1.5rem,env(safe-area-inset-top))]"
     >
       <div className="flex items-center gap-3 px-3">

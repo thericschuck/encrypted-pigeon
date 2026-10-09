@@ -7,12 +7,14 @@ import { ProfileSettings } from "@/components/settings/profile-settings";
 import { SessionWatcher } from "@/components/auth/session-watcher";
 import { ThemeSync } from "@/components/theme-sync";
 import { SignOutButton } from "@/components/settings/sign-out-button";
+import { LanguageSettings } from "@/components/settings/language-settings";
 import { SoundSettings } from "@/components/settings/sound-settings";
 import { InstallAppSettings } from "@/components/settings/install-app-settings";
 import { parseNotificationPrefs } from "@/lib/push/notification-prefs";
+import { getT } from "@/lib/i18n/server";
 
 export default async function SettingsPage() {
-  const [supabase, user] = await Promise.all([getServerSupabase(), getCurrentUser()]);
+  const [supabase, user, t] = await Promise.all([getServerSupabase(), getCurrentUser(), getT()]);
 
   if (!user) {
     redirect("/login");
@@ -36,11 +38,12 @@ export default async function SettingsPage() {
       <ThemeSync
         theme={(profile as MemberProfile).theme}
         accent={(profile as MemberProfile).accent_color}
+        language={(profile as MemberProfile).language}
       />
       <div className="flex items-center gap-3">
         <Link
           href="/"
-          aria-label="Zurück"
+          aria-label={t("settings.back")}
           className="text-neutral-400 hover:text-neutral-600 dark:text-night-muted dark:hover:text-night-text"
         >
           <svg
@@ -54,10 +57,11 @@ export default async function SettingsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <h1 className="text-lg font-semibold">Einstellungen</h1>
+        <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
       </div>
 
       <ProfileSettings profile={profile as MemberProfile} />
+      <LanguageSettings />
       <Link
         href="/schedule"
         className="flex items-center gap-3 rounded-xl border border-neutral-200 p-4 hover:bg-neutral-50 dark:border-night-border dark:bg-night-surface dark:hover:bg-night-raised"
@@ -66,9 +70,9 @@ export default async function SettingsPage() {
           🗓️
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold">Mein Wochenplan</span>
+          <span className="block text-sm font-semibold">{t("settings.scheduleTitle")}</span>
           <span className="block text-xs text-neutral-500 dark:text-night-muted">
-            Training, Freizeit und wann du erreichbar bist, in deiner Zeitzone.
+            {t("settings.scheduleHint")}
           </span>
         </span>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 text-neutral-400">

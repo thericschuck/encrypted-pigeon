@@ -10,6 +10,8 @@
  * play (V4-Flash/-Pro themselves are text-only). All overridable by env.
  */
 
+import type { TFunction } from "@/lib/i18n/translate";
+
 const API_URL = "https://api.deepseek.com/chat/completions";
 
 export type AiMode = "fast" | "deep";
@@ -52,18 +54,18 @@ export type StreamChunk = { type: "reasoning" | "content"; text: string };
 
 export class DeepSeekError extends Error {}
 
-function errorText(status: number, body: string): string {
-  if (status === 401) return "DeepSeek lehnt den API-Key ab (401). Ist DEEPSEEK_API_KEY richtig gesetzt?";
-  if (status === 402) return "Kein Guthaben mehr bei DeepSeek (402). Bitte auf platform.deepseek.com aufladen.";
-  if (status === 429) return "Zu viele Anfragen an DeepSeek (429). Kurz warten und nochmal versuchen.";
-  if (status >= 500) return `DeepSeek ist gerade überlastet oder gestört (${status}). Bitte gleich nochmal versuchen.`;
+function errorText(status: number, body: string, t: TFunction): string {
+  if (status === 401) return t("ai.ds.401");
+  if (status === 402) return t("ai.ds.402");
+  if (status === 429) return t("ai.ds.429");
+  if (status >= 500) return t("ai.ds.5xx", { status });
   let detail = body.slice(0, 300);
   try {
     detail = JSON.parse(body)?.error?.message ?? detail;
   } catch {
     // Not JSON — keep the raw snippet.
   }
-  return `DeepSeek-Fehler ${status}: ${detail}`;
+  return t("ai.ds.other", { status, detail });
 }
 
 /**
@@ -73,10 +75,11 @@ function errorText(status: number, body: string): string {
 export async function* streamChat(
   messages: ChatMessage[],
   choice: ModelChoice,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  t: TFunction
 ): AsyncGenerator<StreamChunk> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new DeepSeekError("DEEPSEEK_API_KEY ist nicht gesetzt.");
+  if (!apiKey) throw new DeepSeekError(t("ai.ds.noKey"));
 
   const response = await fetch(API_URL, {
     method: "POST",
@@ -86,7 +89,7 @@ export async function* streamChat(
   });
 
   if (!response.ok || !response.body) {
-    throw new DeepSeekError(errorText(response.status, await response.text().catch(() => "")));
+    throw new DeepSeekError(errorText(response.status, await response.text().catch(() => ""), t));
   }
 
   // Server-sent events: "data: {json}\n\n", ending with "data: [DONE]".

@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { isAdminEmail } from "@/lib/auth/admin-email";
+import { getLocale, getT } from "@/lib/i18n/server";
+import { intlLocale } from "@/lib/i18n/config";
 import type { Database } from "@/lib/supabase/types";
 import { DeepLError, translate, usage, type Usage } from "@/lib/translate/deepl";
 import { MAX_TRANSLATE_CHARS, isSourceLanguage, isTargetLanguage } from "@/lib/translate/languages";
@@ -33,16 +35,17 @@ async function adminClient() {
 }
 
 export async function translateText(text: string, source: string, target: string): Promise<TranslateResult> {
+  const t = await getT();
   const supabase = await adminClient();
-  if (!supabase) return { ok: false, error: "Nicht berechtigt." };
+  if (!supabase) return { ok: false, error: t("translate.error.notAllowed") };
 
   const trimmed = text.trim();
-  if (!trimmed) return { ok: false, error: "Bitte einen Text eingeben." };
+  if (!trimmed) return { ok: false, error: t("translate.error.emptyText") };
   if (trimmed.length > MAX_TRANSLATE_CHARS) {
-    return { ok: false, error: `Maximal ${MAX_TRANSLATE_CHARS.toLocaleString("de-DE")} Zeichen auf einmal.` };
+    return { ok: false, error: t("translate.error.tooLong", { max: MAX_TRANSLATE_CHARS.toLocaleString(intlLocale(await getLocale())) }) };
   }
   if (!isSourceLanguage(source) || !isTargetLanguage(target)) {
-    return { ok: false, error: "Unbekannte Sprache." };
+    return { ok: false, error: t("translate.error.unknownLanguage") };
   }
 
   // Translated this exact text into this language before? Then that's the
@@ -69,7 +72,7 @@ export async function translateText(text: string, source: string, target: string
   } catch (error) {
     if (error instanceof DeepLError) return { ok: false, error: error.message };
     console.error("Translation failed:", error);
-    return { ok: false, error: "Übersetzung fehlgeschlagen." };
+    return { ok: false, error: t("translate.error.failed") };
   }
 
   const row = {

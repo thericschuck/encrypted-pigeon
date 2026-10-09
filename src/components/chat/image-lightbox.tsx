@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useT } from "@/lib/i18n/client";
 
 interface ImageLightboxProps {
   src: string;
@@ -9,6 +10,7 @@ interface ImageLightboxProps {
 }
 
 export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
+  const t = useT();
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -27,7 +29,7 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
       <button
         type="button"
         onClick={onClose}
-        aria-label="Schließen"
+        aria-label={t("chatMisc.close")}
         className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
       >
         <svg
@@ -44,7 +46,7 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
-        alt={alt ?? "Bild"}
+        alt={alt ?? t("chatMisc.image.alt")}
         onClick={(event) => event.stopPropagation()}
         className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
       />

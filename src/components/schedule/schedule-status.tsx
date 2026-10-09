@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale, useT } from "@/lib/i18n/client";
 import {
   AVAILABILITY_INFO,
   SCHEDULE_CATEGORIES,
+  availabilityLabel,
+  categoryLabel,
   describeStatus,
   statusAt,
   type Schedule,
@@ -17,6 +20,8 @@ import { useNow } from "@/lib/schedule/use-now";
  * Renders nothing if the partner has no (visible) plan.
  */
 export function HeaderScheduleStatus({ schedule }: { schedule: Schedule | null }) {
+  const t = useT();
+  const locale = useLocale();
   const now = useNow();
   if (!schedule) return null;
   const status = now ? statusAt(schedule, now) : null;
@@ -32,11 +37,11 @@ export function HeaderScheduleStatus({ schedule }: { schedule: Schedule | null }
             aria-hidden="true"
             className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${AVAILABILITY_INFO[status.current.block.availability].dotClass}`}
           />
-          <span className="truncate">{describeStatus(status, now, browserTimeZone())}</span>
+          <span className="truncate">{describeStatus(status, now, browserTimeZone(), t, locale)}</span>
         </>
       ) : (
         // Also the placeholder before mount, so the header doesn't jump.
-        <span className="truncate">🗓️ Wochenplan ansehen</span>
+        <span className="truncate">{t("schedule.status.viewPlan")}</span>
       )}
     </Link>
   );
@@ -47,6 +52,7 @@ export function HeaderScheduleStatus({ schedule }: { schedule: Schedule | null }
  * Nothing while no block is running.
  */
 export function AvatarScheduleDot({ schedule }: { schedule: Schedule | null | undefined }) {
+  const t = useT();
   const now = useNow(60_000);
   if (!schedule || !now) return null;
   const status = statusAt(schedule, now);
@@ -56,7 +62,7 @@ export function AvatarScheduleDot({ schedule }: { schedule: Schedule | null | un
 
   return (
     <span
-      title={`${category.emoji} ${category.label} · ${AVAILABILITY_INFO[block.availability].label}`}
+      title={`${category.emoji} ${categoryLabel(t, block.category)} · ${availabilityLabel(t, block.availability)}`}
       className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-night-bg ${AVAILABILITY_INFO[block.availability].dotClass}`}
     />
   );

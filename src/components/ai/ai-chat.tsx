@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useT } from "@/lib/i18n/client";
 import { createClient } from "@/lib/supabase/client";
 import type { AiMode } from "@/lib/ai/deepseek";
 import {
@@ -69,12 +70,7 @@ interface AiChatProps {
 }
 
 const MODE_KEY = "pigeon-ai-mode";
-const SUGGESTIONS = [
-  "Wie sage ich „Wo ist die nächste Apotheke?“ auf Chinesisch (mit Pinyin)?",
-  "Wie spät ist es gerade in Deutschland?",
-  "Wann habe ich heute laut Plan frei?",
-  "Was hilft gegen Muskelkater nach hartem Training?",
-];
+const SUGGESTION_KEYS = ["ai.suggestion1", "ai.suggestion2", "ai.suggestion3", "ai.suggestion4"];
 
 function readMode(): AiMode {
   try {
@@ -104,6 +100,7 @@ function Markdown({ text }: { text: string }) {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -119,7 +116,7 @@ function CopyButton({ text }: { text: string }) {
       }}
       className="text-[11px] text-neutral-400 hover:text-neutral-600 dark:text-night-muted dark:hover:text-night-text"
     >
-      {copied ? "Kopiert ✓" : "Kopieren"}
+      {copied ? t("ai.copied") : t("ai.copy")}
     </button>
   );
 }
@@ -140,6 +137,7 @@ export function AiChat({
   initialInstructions,
   initialMemories,
 }: AiChatProps) {
+  const t = useT();
   const [conversations, setConversations] = useState(initialConversations);
   const [activeId, setActiveId] = useState(initialConversationId);
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
@@ -224,7 +222,7 @@ export function AiChat({
       .order("created_at", { ascending: true });
     setLoadingConversation(false);
     if (loadError) {
-      setError(`Unterhaltung konnte nicht geladen werden: ${loadError.message}`);
+      setError(t("ai.loadFailed", { message: loadError.message }));
       return;
     }
     stickToBottomRef.current = true;
@@ -235,11 +233,11 @@ export function AiChat({
   }
 
   async function deleteConversation(id: string) {
-    if (!window.confirm("Diese Unterhaltung löschen?")) return;
+    if (!window.confirm(t("ai.deleteConversationConfirm"))) return;
     const { data: withImages } = await createClient().from("ai_messages").select("images").eq("conversation_id", id);
     const { error: deleteError } = await createClient().from("ai_conversations").delete().eq("id", id);
     if (deleteError) {
-      setError(`Löschen fehlgeschlagen: ${deleteError.message}`);
+      setError(t("ai.deleteFailed", { message: deleteError.message }));
       return;
     }
     // The photos go too (best effort — a leftover file only costs storage).
@@ -254,7 +252,7 @@ export function AiChat({
     event.target.value = "";
     if (files.length === 0) return;
     const room = AI_MAX_IMAGES_PER_MESSAGE - pendingImages.length;
-    if (files.length > room) setError(`Höchstens ${AI_MAX_IMAGES_PER_MESSAGE} Fotos pro Frage.`);
+    if (files.length > room) setError(t("ai.maxPhotos", { max: AI_MAX_IMAGES_PER_MESSAGE }));
     setPreparingImages(true);
     try {
       const processed = await Promise.all(
@@ -269,7 +267,7 @@ export function AiChat({
       );
       setPendingImages((all) => [...all, ...processed]);
     } catch {
-      setError("Das Foto konnte nicht gelesen werden. Bitte ein anderes Format probieren.");
+      setError(t("ai.photoUnreadable"));
     } finally {
       setPreparingImages(false);
     }
@@ -290,7 +288,7 @@ export function AiChat({
       images.map(async (image) => {
         const path = `${userId}/${crypto.randomUUID()}.${image.extension}`;
         const { error: uploadError } = await storage.upload(path, image.blob, { contentType: image.contentType });
-        if (uploadError) throw new Error(`Foto-Upload fehlgeschlagen: ${uploadError.message}`);
+        if (uploadError) throw new Error(t("ai.uploadFailed", { message: uploadError.message }));
         return { path, preview: image.previewUrl };
       })
     );
@@ -346,7 +344,7 @@ export function AiChat({
       });
       if (!response.ok || !response.body) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? `Fehler ${response.status}`);
+        throw new Error(body?.error ?? t("ai.errorStatus", { status: response.status }));
       }
 
       const reader = response.body.getReader();
@@ -382,7 +380,7 @@ export function AiChat({
       }
     } catch (e) {
       if (controller.signal.aborted) {
-        update((m) => ({ ...m, pending: false, error: m.content ? undefined : "Abgebrochen." }));
+        update((m) => ({ ...m, pending: false, error: m.content ? undefined : t("ai.aborted") }));
       } else {
         update((m) => ({ ...m, pending: false, error: e instanceof Error ? e.message : String(e) }));
       }
@@ -395,7 +393,7 @@ export function AiChat({
         const id = conversationId;
         const fallbackTitle = trimmed
           ? `${paths.length ? "📷 " : ""}${trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed}`
-          : "📷 Foto";
+          : `📷 ${t("ai.photoTitle")}`;
         setConversations((all) => {
           const existing = all.find((c) => c.id === id);
           return [
@@ -414,7 +412,7 @@ export function AiChat({
       .select("id, content")
       .single();
     if (insertError || !data) {
-      setError(`Merken fehlgeschlagen: ${insertError?.message}`);
+      setError(t("ai.rememberFailed", { message: insertError?.message ?? "" }));
       return;
     }
     setMemories((all) => [...all, data]);
@@ -444,10 +442,10 @@ export function AiChat({
         onClick={newConversation}
         className="mb-1 rounded-xl border border-neutral-200 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-50 dark:border-night-border dark:hover:bg-night-raised"
       >
-        + Neue Unterhaltung
+        {t("ai.newConversationButton")}
       </button>
       {conversations.length === 0 && (
-        <p className="px-3 py-2 text-xs text-neutral-400 dark:text-night-muted">Noch keine Unterhaltungen.</p>
+        <p className="px-3 py-2 text-xs text-neutral-400 dark:text-night-muted">{t("ai.noConversations")}</p>
       )}
       {conversations.map((c) => (
         <div
@@ -466,7 +464,7 @@ export function AiChat({
           <button
             type="button"
             onClick={() => void deleteConversation(c.id)}
-            aria-label="Unterhaltung löschen"
+            aria-label={t("ai.deleteConversation")}
             className="flex-shrink-0 rounded-full p-1.5 text-neutral-400 opacity-100 hover:text-red-600 md:opacity-0 md:group-hover:opacity-100 dark:text-night-muted"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
@@ -482,7 +480,7 @@ export function AiChat({
     <div className="flex min-h-0 flex-1">
       <aside className="hidden w-72 flex-shrink-0 flex-col border-r border-neutral-200 pt-[env(safe-area-inset-top)] md:flex dark:border-night-border">
         <div className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-          Verlauf
+          {t("ai.history")}
         </div>
         {history}
       </aside>
@@ -491,11 +489,11 @@ export function AiChat({
         <div className="fixed inset-0 z-40 flex md:hidden">
           <div className="flex w-[85%] max-w-xs flex-col bg-white pt-[env(safe-area-inset-top)] shadow-xl dark:bg-night-bg">
             <div className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-night-muted">
-              Verlauf
+              {t("ai.history")}
             </div>
             {history}
           </div>
-          <button type="button" aria-label="Verlauf schließen" onClick={() => setHistoryOpen(false)} className="flex-1 bg-black/30" />
+          <button type="button" aria-label={t("ai.historyClose")} onClick={() => setHistoryOpen(false)} className="flex-1 bg-black/30" />
         </div>
       )}
 
@@ -514,34 +512,34 @@ export function AiChat({
         <header className="flex items-center gap-1 border-b border-neutral-200 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-night-border">
           <Link
             href="/"
-            aria-label="Zurück"
+            aria-label={t("ai.back")}
             className="mr-1 flex-shrink-0 text-neutral-400 hover:text-neutral-600 dark:text-night-muted dark:hover:text-night-text"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">🦉 KI-Assistent</h1>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("ai.title")}</h1>
           <button
             type="button"
             onClick={() => setMemoryOpen(true)}
-            title="Gedächtnis & Anweisungen"
+            title={t("ai.memoryTitle")}
             className="rounded-full px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
-            🧠 Gedächtnis{memories.length > 0 && ` (${memories.length})`}
+            {t("ai.memoryButton")}{memories.length > 0 && ` (${memories.length})`}
           </button>
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
             className="rounded-full px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-night-muted dark:hover:bg-night-raised"
           >
-            Verlauf
+            {t("ai.history")}
           </button>
           <button
             type="button"
             onClick={newConversation}
-            aria-label="Neue Unterhaltung"
-            title="Neue Unterhaltung"
+            aria-label={t("ai.newConversation")}
+            title={t("ai.newConversation")}
             className="rounded-full p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -561,21 +559,19 @@ export function AiChat({
           <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4">
             {!configured && (
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
-                Es ist noch kein DeepSeek-API-Key hinterlegt. Trag <code>DEEPSEEK_API_KEY</code> in die Umgebungsvariablen
-                ein (lokal <code>.env.local</code>, beim Hosting in den Projekt-Einstellungen) und starte die App neu.
+                {t("ai.noKey")}
               </div>
             )}
 
-            {loadingConversation && <p className="text-center text-xs text-neutral-400">Lädt…</p>}
+            {loadingConversation && <p className="text-center text-xs text-neutral-400">{t("ai.loading")}</p>}
 
             {messages.length === 0 && !loadingConversation && (
               <div className="flex flex-col items-center gap-4 pt-10 text-center">
                 <span className="text-4xl">🦉</span>
                 <div>
-                  <p className="font-semibold">Frag mich etwas oder schick mir ein Foto</p>
+                  <p className="font-semibold">{t("ai.emptyTitle")}</p>
                   <p className="text-xs text-neutral-500 dark:text-night-muted">
-                    DeepSeek, funktioniert auch in China ohne VPN. Ich kenne deine Uhrzeit, deinen Wochenplan und dein
-                    Gedächtnis, aber kein Internet.
+                    {t("ai.emptyHint")}
                   </p>
                 </div>
                 {memories.length === 0 && (
@@ -584,19 +580,19 @@ export function AiChat({
                     onClick={() => setMemoryOpen(true)}
                     className="rounded-xl bg-[#c1643a]/10 px-3 py-2 text-sm text-[#8a3f1f] hover:bg-[#c1643a]/15 dark:bg-night-accent/15 dark:text-night-accent"
                   >
-                    🧠 Erzähl mir erst kurz, wer du bist und was du in China machst, dann werden die Antworten besser.
+                    {t("ai.emptyMemoryPrompt")}
                   </button>
                 )}
                 <div className="flex w-full flex-col gap-2">
-                  {SUGGESTIONS.map((s) => (
+                  {SUGGESTION_KEYS.map((key) => (
                     <button
-                      key={s}
+                      key={key}
                       type="button"
                       disabled={!configured}
-                      onClick={() => void ask(s)}
+                      onClick={() => void ask(t(key))}
                       className="rounded-xl border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50 disabled:opacity-50 dark:border-night-border dark:hover:bg-night-surface"
                     >
-                      {s}
+                      {t(key)}
                     </button>
                   ))}
                 </div>
@@ -615,7 +611,7 @@ export function AiChat({
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={imageUrls[path]}
-                                alt="Gesendetes Foto"
+                                alt={t("ai.sentPhoto")}
                                 className="h-32 w-32 rounded-2xl object-cover sm:h-40 sm:w-40"
                               />
                             </a>
@@ -643,7 +639,7 @@ export function AiChat({
                       open={m.pending && !m.content}
                     >
                       <summary className="cursor-pointer select-none">
-                        🧠 {m.pending && !m.content ? "Denkt nach…" : "Gedankengang"}
+                        🧠 {m.pending && !m.content ? t("ai.thinking") : t("ai.reasoning")}
                       </summary>
                       <p className="mt-2 whitespace-pre-wrap">{m.reasoning}</p>
                     </details>
@@ -653,7 +649,7 @@ export function AiChat({
                   ) : (
                     m.pending &&
                     !m.reasoning && (
-                      <p className="animate-pulse text-sm text-neutral-400 dark:text-night-muted">Schreibt…</p>
+                      <p className="animate-pulse text-sm text-neutral-400 dark:text-night-muted">{t("ai.writing")}</p>
                     )
                   )}
                   {!m.pending &&
@@ -667,10 +663,10 @@ export function AiChat({
                             className="animate-fade-in flex items-center gap-2 rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-xs dark:border-night-border"
                           >
                             <span className="min-w-0 flex-1">
-                              💾 <span className="text-neutral-500 dark:text-night-muted">Merken:</span> {s}
+                              💾 <span className="text-neutral-500 dark:text-night-muted">{t("ai.remember")}</span> {s}
                             </span>
                             {known ? (
-                              <span className="flex-shrink-0 text-neutral-400 dark:text-night-muted">Gemerkt ✓</span>
+                              <span className="flex-shrink-0 text-neutral-400 dark:text-night-muted">{t("ai.remembered")}</span>
                             ) : (
                               <>
                                 <button
@@ -678,12 +674,12 @@ export function AiChat({
                                   onClick={() => void acceptSuggestion(s)}
                                   className="flex-shrink-0 rounded-full bg-accent px-2.5 py-1 font-medium text-on-accent"
                                 >
-                                  Übernehmen
+                                  {t("ai.accept")}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setDismissedSuggestions((all) => [...all, `${m.id}:${s}`])}
-                                  aria-label="Nicht merken"
+                                  aria-label={t("ai.dontRemember")}
                                   className="flex-shrink-0 text-neutral-400 hover:text-neutral-600 dark:text-night-muted"
                                 >
                                   ✕
@@ -715,7 +711,7 @@ export function AiChat({
             {error && (
               <div className="flex items-start justify-between gap-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
                 <span>{error}</span>
-                <button type="button" onClick={() => setError(null)} aria-label="Hinweis schließen">
+                <button type="button" onClick={() => setError(null)} aria-label={t("ai.closeNotice")}>
                   ✕
                 </button>
               </div>
@@ -725,11 +721,11 @@ export function AiChat({
                 {pendingImages.map((image) => (
                   <div key={image.id} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.previewUrl} alt="Ausgewähltes Foto" className="h-16 w-16 rounded-xl object-cover" />
+                    <img src={image.previewUrl} alt={t("ai.selectedPhoto")} className="h-16 w-16 rounded-xl object-cover" />
                     <button
                       type="button"
                       onClick={() => removePendingImage(image.id)}
-                      aria-label="Foto entfernen"
+                      aria-label={t("ai.removePhoto")}
                       className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-neutral-800 text-[10px] text-white"
                     >
                       ✕
@@ -743,8 +739,8 @@ export function AiChat({
               <div className="flex rounded-full bg-neutral-100 p-0.5 text-xs dark:bg-night-raised">
                 {(
                   [
-                    { value: "fast", label: "⚡ Schnell" },
-                    { value: "deep", label: "🧠 Gründlich" },
+                    { value: "fast", labelKey: "ai.modeFast" },
+                    { value: "deep", labelKey: "ai.modeDeep" },
                   ] as const
                 ).map((option) => (
                   <button
@@ -756,15 +752,15 @@ export function AiChat({
                       mode === option.value ? "bg-white font-medium shadow-sm dark:bg-night-surface" : "text-neutral-500 dark:text-night-muted"
                     }`}
                   >
-                    {option.label}
+                    {t(option.labelKey)}
                   </button>
                 ))}
               </div>
               <span className="truncate text-[11px] text-neutral-400 dark:text-night-muted">
                 {pendingImages.length > 0
-                  ? "Fotos gehen ans Bildmodell"
+                  ? t("ai.photosToVision")
                   : mode === "deep"
-                    ? "denkt länger, für knifflige Fragen"
+                    ? t("ai.deepHint")
                     : ""}
               </span>
             </div>
@@ -781,8 +777,8 @@ export function AiChat({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!configured || streaming || pendingImages.length >= AI_MAX_IMAGES_PER_MESSAGE}
-                aria-label="Foto anhängen"
-                title="Foto anhängen"
+                aria-label={t("ai.attachPhoto")}
+                title={t("ai.attachPhoto")}
                 className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 disabled:opacity-40 dark:text-night-muted dark:hover:bg-night-raised"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
@@ -798,7 +794,7 @@ export function AiChat({
                 rows={1}
                 maxLength={AI_MAX_QUESTION_CHARS}
                 disabled={!configured}
-                placeholder={pendingImages.length > 0 ? "Frage zum Foto (optional)…" : "Frag den Assistenten…"}
+                placeholder={pendingImages.length > 0 ? t("ai.placeholderPhoto") : t("ai.placeholder")}
                 className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-neutral-300 px-3 py-2 text-base focus:border-accent focus:outline-none disabled:opacity-50 sm:text-sm dark:border-night-border dark:bg-night-surface"
               />
               {streaming ? (
@@ -807,7 +803,7 @@ export function AiChat({
                   onClick={() => abortRef.current?.abort()}
                   className="flex-shrink-0 rounded-full border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-night-border"
                 >
-                  Stopp
+                  {t("ai.stop")}
                 </button>
               ) : (
                 <button
@@ -815,7 +811,7 @@ export function AiChat({
                   disabled={!canSend}
                   className="flex-shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-50"
                 >
-                  Senden
+                  {t("ai.send")}
                 </button>
               )}
             </form>

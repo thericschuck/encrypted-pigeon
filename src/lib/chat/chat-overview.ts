@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, MessageKind } from "@/lib/supabase/types";
 import { MEMBER_PROFILE_COLUMNS, type MemberProfile } from "@/lib/profile";
 import { sortByActivity } from "@/lib/chat/chat-list-store";
+import type { TFunction } from "@/lib/i18n/translate";
 import { loadSchedules, type Schedule } from "@/lib/schedule/schedule";
 
 type PigeonClient = SupabaseClient<Database, "pigeon">;
@@ -30,16 +31,20 @@ export interface ChatOverview {
   membersWithoutChat: MemberProfile[];
 }
 
-export function previewOf(m: {
+/** `t` localizes the attachment placeholders; without it only the emoji is shown. */
+export function previewOf(
+  m: {
   content: string | null;
   image_url: string | null;
   audio_url: string | null;
   video_url?: string | null;
-}) {
+  },
+  t?: TFunction
+) {
   if (m.content) return m.content;
-  if (m.image_url) return "📷 Bild";
-  if (m.video_url) return "🎬 Video";
-  if (m.audio_url) return "🎤 Sprachnachricht";
+  if (m.image_url) return t ? t("dashboard.previewImage") : "📷";
+  if (m.video_url) return t ? t("dashboard.previewVideo") : "🎬";
+  if (m.audio_url) return t ? t("dashboard.previewVoice") : "🎤";
   return "";
 }
 
@@ -49,7 +54,7 @@ export function previewOf(m: {
  * member profiles, only their own chats, and — importantly — no content of
  * pigeon letters still in flight to them (those simply aren't returned).
  */
-export async function loadChatOverview(supabase: PigeonClient, userId: string): Promise<ChatOverview> {
+export async function loadChatOverview(supabase: PigeonClient, userId: string, t?: TFunction): Promise<ChatOverview> {
   const [{ data: profiles }, { data: myRows }] = await Promise.all([
     supabase.from("profiles").select(MEMBER_PROFILE_COLUMNS),
     supabase.from("chat_participants").select("chat_id").eq("user_id", userId),
@@ -107,7 +112,7 @@ export async function loadChatOverview(supabase: PigeonClient, userId: string): 
       partner,
       lastMessage: last
         ? {
-            preview: previewOf(last),
+            preview: previewOf(last, t),
             kind: last.kind,
             createdAt: last.created_at,
             fromMe: last.sender_id === userId,

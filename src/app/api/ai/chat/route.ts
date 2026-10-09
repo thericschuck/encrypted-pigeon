@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale, getT } from "@/lib/i18n/server";
+import { intlLocale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
 import type { Database } from "@/lib/supabase/types";
 import { isAdminEmail } from "@/lib/auth/admin-email";
 import { loadSchedules } from "@/lib/schedule/schedule";
@@ -30,9 +33,6 @@ export const maxDuration = 300;
 
 type PigeonClient = SupabaseClient<Database, "pigeon">;
 
-// A photo sent without a question.
-const DEFAULT_IMAGE_QUESTION = "Was ist das? Lies den Text ab, übersetze ihn und erklär mir, was es ist.";
-
 function json(status: number, error: string) {
   return Response.json({ error }, { status });
 }
@@ -56,7 +56,7 @@ interface StoredMessage {
  * newest few messages that had any (so follow-ups about "das Produkt"
  * work); older ones are only mentioned, to keep requests small.
  */
-async function toChatMessages(supabase: PigeonClient, history: StoredMessage[]): Promise<{ messages: ChatMessage[]; withImages: boolean }> {
+async function toChatMessages(supabase: PigeonClient, history: StoredMessage[], t: TFunction): Promise<{ messages: ChatMessage[]; withImages: boolean }> {
   const imageMessageIndexes = history
     .map((m, i) => (m.images.length > 0 ? i : -1))
     .filter((i) => i >= 0)
@@ -68,7 +68,7 @@ async function toChatMessages(supabase: PigeonClient, history: StoredMessage[]):
       const text = m.role === "assistant" ? splitMemorySuggestions(m.content).text : m.content;
       if (m.images.length === 0) return { role: m.role, content: text };
       if (!imageMessageIndexes.includes(i)) {
-        return { role: m.role, content: `${text}\n\n[${m.images.length === 1 ? "Ein Foto" : `${m.images.length} Fotos`} von früher im Gespräch]` };
+        return { role: m.role, content: `${text}\n\n[${m.images.length === 1 ? t("ai.earlierPhoto") : t("ai.earlierPhotos", { count: m.images.length })}]` };
       }
       const urls = (await Promise.all(m.images.map((path) => imageDataUrl(supabase, path)))).filter(
         (url): url is string => !!url
@@ -95,44 +95,45 @@ async function toChatMessages(supabase: PigeonClient, history: StoredMessage[]):
  * database always matches what was shown.
  */
 export async function POST(request: Request) {
+  const [t, locale] = await Promise.all([getT(), getLocale()]);
   const supabase = await createClient();
   // getUser(), not getClaims(): this spends DeepSeek credit, so a session
   // revoked elsewhere must not count. Admin only, like /translate.
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user || !isAdminEmail(user.email)) return json(403, "Nicht berechtigt.");
+  if (!user || !isAdminEmail(user.email)) return json(403, t("ai.err.forbidden"));
 
   let body: { conversationId?: unknown; message?: unknown; mode?: unknown; images?: unknown };
   try {
     body = await request.json();
   } catch {
-    return json(400, "Ungültige Anfrage.");
+    return json(400, t("ai.err.badRequest"));
   }
   const images = Array.isArray(body.images)
     ? body.images.filter((p): p is string => typeof p === "string" && p.startsWith(`${user.id}/`) && !p.includes(".."))
     : [];
-  if (images.length > AI_MAX_IMAGES_PER_MESSAGE) return json(400, `Höchstens ${AI_MAX_IMAGES_PER_MESSAGE} Fotos auf einmal.`);
+  if (images.length > AI_MAX_IMAGES_PER_MESSAGE) return json(400, t("ai.err.tooManyImages", { max: AI_MAX_IMAGES_PER_MESSAGE }));
   const typed = typeof body.message === "string" ? body.message.trim() : "";
-  const question = typed || (images.length > 0 ? DEFAULT_IMAGE_QUESTION : "");
+  const question = typed || (images.length > 0 ? t("ai.defaultImageQuestion") : "");
   const mode: AiMode = body.mode === "deep" ? "deep" : "fast";
-  if (!question) return json(400, "Bitte eine Frage eingeben.");
+  if (!question) return json(400, t("ai.err.noQuestion"));
   if (question.length > AI_MAX_QUESTION_CHARS) {
-    return json(400, `Maximal ${AI_MAX_QUESTION_CHARS.toLocaleString("de-DE")} Zeichen auf einmal.`);
+    return json(400, t("ai.err.tooLong", { max: AI_MAX_QUESTION_CHARS.toLocaleString(intlLocale(locale)) }));
   }
 
   let conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
   if (conversationId) {
     // RLS: only finds my own conversations.
     const { data } = await supabase.from("ai_conversations").select("id").eq("id", conversationId).maybeSingle();
-    if (!data) return json(404, "Unterhaltung nicht gefunden.");
+    if (!data) return json(404, t("ai.err.notFound"));
   } else {
     const { data, error } = await supabase
       .from("ai_conversations")
-      .insert({ owner_id: user.id, title: titleFrom(typed, images.length > 0) })
+      .insert({ owner_id: user.id, title: titleFrom(typed, images.length > 0, t) })
       .select("id")
       .single();
-    if (error || !data) return json(500, `Unterhaltung konnte nicht angelegt werden: ${error?.message}`);
+    if (error || !data) return json(500, t("ai.err.createFailed", { message: error?.message ?? "" }));
     conversationId = data.id;
   }
 
@@ -155,7 +156,7 @@ export async function POST(request: Request) {
   const { error: insertError } = await supabase
     .from("ai_messages")
     .insert({ conversation_id: conversationId, role: "user", content: typed || question, images });
-  if (insertError) return json(500, `Frage konnte nicht gespeichert werden: ${insertError.message}`);
+  if (insertError) return json(500, t("ai.err.saveQuestionFailed", { message: insertError.message }));
 
   const me = profile as MemberProfile | null;
   const timezone = me?.timezone ?? "Europe/Berlin";
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
   const { messages: conversation, withImages } = await toChatMessages(supabase, [
     ...(previous ?? []).reverse(),
     { role: "user", content: question, images },
-  ]);
+  ], t);
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -173,6 +174,8 @@ export async function POST(request: Request) {
         schedule,
         instructions: settings?.instructions ?? "",
         memories: (memories ?? []).map((m) => m.content),
+        locale,
+        t,
       }),
     },
     ...conversation,
@@ -200,7 +203,7 @@ export async function POST(request: Request) {
       let reasoning = "";
       let failure: string | null = null;
       try {
-        for await (const chunk of streamChat(messages, choice, upstream.signal)) {
+        for await (const chunk of streamChat(messages, choice, upstream.signal, t)) {
           if (chunk.type === "content") content += chunk.text;
           else reasoning += chunk.text;
           send(chunk);
@@ -210,7 +213,7 @@ export async function POST(request: Request) {
           failure =
             error instanceof DeepSeekError
               ? error.message
-              : `Verbindung zu DeepSeek unterbrochen: ${error instanceof Error ? error.message : String(error)}`;
+              : t("ai.err.connectionLost", { message: error instanceof Error ? error.message : String(error) });
         }
       }
 

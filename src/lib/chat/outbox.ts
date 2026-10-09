@@ -24,6 +24,7 @@ import { CHAT_VOICE_BUCKET, baseMimeType, buildChatVoicePath } from "@/lib/chat/
 import { VideoTooLargeError, processVideo } from "@/lib/media/video";
 import { previewOf } from "@/lib/chat/chat-overview";
 import { noteChatActivity } from "@/lib/chat/chat-list-store";
+import { chatT } from "@/lib/chat/chat-translator";
 import { isSessionExpiredError, redirectToLoginForExpiredSession } from "@/lib/auth/session-expiry";
 import {
   forgetPersistedMessage,
@@ -113,20 +114,20 @@ function syncUnloadGuard() {
 // ---------------------------------------------------------------------------
 function sendErrorMessage(): string {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
-    return "Keine Internetverbindung. Nachricht wurde nicht gesendet.";
+    return chatT("chatMisc.outbox.offlineSend");
   }
-  return "Nachricht konnte nicht gesendet werden.";
+  return chatT("chatMisc.outbox.sendFailed");
 }
 
 function uploadErrorMessage(error: unknown): string {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return "Keine Internetverbindung. Upload fehlgeschlagen.";
-  if (error instanceof ChatUploadError) return error.message;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return chatT("chatMisc.outbox.offlineUpload");
+  if (error instanceof ChatUploadError) return chatT(error.message, error.params);
   if (error instanceof VideoTooLargeError) {
     return error.message === "unsupported"
-      ? "Dieser Browser kann das Video nicht verkleinern. Bitte Browser aktualisieren oder anderes Gerät nutzen."
-      : "Video ist zu lang (über ca. 1,5 Std.), um es klein genug zu rechnen.";
+      ? chatT("chatMisc.outbox.videoUnsupported")
+      : chatT("chatMisc.outbox.videoTooLong");
   }
-  return "Upload fehlgeschlagen. Bitte erneut versuchen.";
+  return chatT("chatMisc.outbox.uploadFailed");
 }
 
 function progressUpdater(id: string) {
@@ -267,7 +268,7 @@ async function performSend(id: string): Promise<boolean> {
     // Keeps the chat list current even when no chat is open right now.
     if (serverRow) {
       noteChatActivity(chatId, {
-        preview: previewOf(serverRow),
+        preview: previewOf(serverRow, chatT),
         kind: serverRow.kind,
         createdAt: serverRow.created_at,
         fromMe: true,

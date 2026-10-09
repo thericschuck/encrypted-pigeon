@@ -5,8 +5,11 @@ import { motion } from "framer-motion";
 import {
   TRANSMIT_LINES,
   MID_SEQUENCE_LINES,
-  type EncryptionLineTemplate,
+  resolveEncryptionLines,
+  type EncryptionLine,
 } from "@/lib/chat/encryption-lines";
+import type { TFunction } from "@/lib/i18n/translate";
+import { useT } from "@/lib/i18n/client";
 import { playEncryptEnd, preloadChimeSounds } from "@/lib/chat/chime-sounds";
 
 interface EncryptionBackdropProps {
@@ -25,9 +28,9 @@ function shuffled<T>(items: T[]): T[] {
 
 // 6-9 mid lines + the 2 closing lines lands the whole sequence around 4-7s
 // (see per-line delays below), without hand-tuning an exact total.
-function pickSequence(): EncryptionLineTemplate[] {
+function pickSequence(t: TFunction): EncryptionLine[] {
   const midCount = 6 + Math.floor(Math.random() * 4);
-  return [...shuffled(MID_SEQUENCE_LINES).slice(0, midCount), ...TRANSMIT_LINES];
+  return resolveEncryptionLines([...shuffled(MID_SEQUENCE_LINES).slice(0, midCount), ...TRANSMIT_LINES], t);
 }
 
 const BAR_WIDTH = 20;
@@ -64,7 +67,7 @@ const PROGRESS_LINE_DELAY_MS = 850;
 const FINAL_PAUSE_MS = 550;
 
 // Light + dark variants: this sits behind the chat, on either background.
-function lineColorClass(kind: EncryptionLineTemplate["kind"]) {
+function lineColorClass(kind: EncryptionLine["kind"]) {
   switch (kind) {
     case "warning":
       return "text-amber-600 dark:text-amber-400";
@@ -87,7 +90,8 @@ const VISIBLE_LINE_COUNT = 14;
  * restart it for the next message.
  */
 export function EncryptionBackdrop({ onComplete }: EncryptionBackdropProps) {
-  const [lines] = useState(pickSequence);
+  const t = useT();
+  const [lines] = useState(() => pickSequence(t));
   const [revealedCount, setRevealedCount] = useState(0);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;

@@ -1,3 +1,6 @@
+import { intlLocale, type Locale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
+
 /**
  * Wall-clock ↔ instant conversion for arbitrary IANA time zones, on top of
  * Intl only (no date library). A Wochenplan is written in its owner's zone
@@ -130,26 +133,52 @@ export function formatTime(date: Date, timeZone: string): string {
   return formatMinute(zonedParts(date, timeZone).minuteOfDay);
 }
 
-export const WEEKDAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"] as const;
-export const WEEKDAY_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"] as const;
+const weekdayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function weekdayName(weekday: number, locale: Locale, style: "short" | "long"): string {
+  const key = `${locale}|${style}`;
+  let formatter = weekdayFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(intlLocale(locale), { weekday: style, timeZone: "UTC" });
+    weekdayFormatters.set(key, formatter);
+  }
+  // 2024-01-01 was a Monday, so ISO weekday n is January n.
+  return formatter.format(new Date(Date.UTC(2024, 0, weekday)));
+}
+
+/** "Mo" / "Mon" / "lun." / "周一" for an ISO weekday (1 = Monday … 7 = Sunday). */
+export function weekdayShort(weekday: number, locale: Locale): string {
+  return weekdayName(weekday, locale, "short");
+}
+
+/** "Montag" / "Monday" / "lundi" / "星期一". */
+export function weekdayLong(weekday: number, locale: Locale): string {
+  return weekdayName(weekday, locale, "long");
+}
 
 /**
- * "17:00" if `date` is today in `timeZone` relative to `now`, "morgen
- * 05:30" for tomorrow, otherwise "Mi 05:30".
+ * "17:00" if `date` is today in `timeZone` relative to `now`, "tomorrow
+ * 05:30" for tomorrow, otherwise "Wed 05:30".
  */
-export function formatRelativeTime(date: Date, now: Date, timeZone: string): string {
+export function formatRelativeTime(date: Date, now: Date, timeZone: string, t: TFunction, locale: Locale): string {
   const target = zonedParts(date, timeZone);
   const today = zonedParts(now, timeZone).dateKey;
   const time = formatMinute(target.minuteOfDay);
   if (target.dateKey === today) return time;
-  if (target.dateKey === addDays(today, 1)) return `morgen ${time}`;
-  return `${WEEKDAY_SHORT[target.weekday - 1]} ${time}`;
+  if (target.dateKey === addDays(today, 1)) return t("schedule.tomorrow", { time });
+  return `${weekdayShort(target.weekday, locale)} ${time}`;
 }
 
-/** "25.09." */
-export function formatDayMonth(dateKey: string): string {
-  const [, month, day] = dateKey.split("-");
-  return `${day}.${month}.`;
+const dayMonthFormatters = new Map<Locale, Intl.DateTimeFormat>();
+
+/** "25.09." (de) / "25/09" (en, fr) / "09/25" (zh) for a "YYYY-MM-DD" key. */
+export function formatDayMonth(dateKey: string, locale: Locale): string {
+  let formatter = dayMonthFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(intlLocale(locale), { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+    dayMonthFormatters.set(locale, formatter);
+  }
+  return formatter.format(new Date(utcOfKey(dateKey)));
 }
 
 /** Short city-ish name of a zone: "Asia/Shanghai" → "Shanghai". */

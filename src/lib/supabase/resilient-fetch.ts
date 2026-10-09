@@ -67,6 +67,3 @@ export function isNetworkError(error: unknown): boolean {
   if (e.name === "AuthRetryableFetchError") return true;
   return NETWORK_ERROR_PATTERN.test(e.message ?? String(error));
 }
-
-export const NETWORK_ERROR_MESSAGE =
-  "Verbindung zum Server fehlgeschlagen. Bitte Internet/VPN prüfen und nochmal versuchen.";

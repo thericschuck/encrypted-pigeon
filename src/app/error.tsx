@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { useT } from "@/lib/i18n/client";
 
 /**
  * Last-resort boundary for anything that throws during render or in a
@@ -15,6 +16,7 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT();
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -22,9 +24,9 @@ export default function GlobalError({
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-sm flex-col items-center justify-center gap-4 px-6 text-center">
       <span className="text-4xl">🪶</span>
-      <h1 className="text-lg font-semibold">Da ist etwas schiefgelaufen</h1>
+      <h1 className="text-lg font-semibold">{t("system.error.title")}</h1>
       <p className="text-sm text-neutral-500 dark:text-night-muted">
-        Die Taube hat sich verflogen. Prüfe deine Verbindung und versuche es noch einmal.
+        {t("system.error.body")}
       </p>
       <div className="flex gap-2">
         <button
@@ -32,13 +34,13 @@ export default function GlobalError({
           onClick={reset}
           className="rounded-full bg-accent px-4 py-2 text-sm text-on-accent"
         >
-          Erneut versuchen
+          {t("system.error.retry")}
         </button>
         <Link
           href="/"
           className="rounded-full border border-neutral-300 px-4 py-2 text-sm dark:border-night-border"
         >
-          Zur Startseite
+          {t("system.error.home")}
         </Link>
       </div>
     </main>

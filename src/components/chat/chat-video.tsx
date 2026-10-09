@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT } from "@/lib/i18n/client";
 
 // "#t=0.001" makes Safari (iOS especially) decode and show the first frame
 // as the thumbnail — with plain preload="metadata" it stays a black box
@@ -36,6 +37,7 @@ export function ChatVideo({
   onLoaded: () => void;
   onError: () => void;
 }) {
+  const t = useT();
   const [meta, setMeta] = useState<{ duration: number; hasPicture: boolean } | null>(null);
 
   return (
@@ -43,7 +45,7 @@ export function ChatVideo({
       type="button"
       onClick={onOpen}
       disabled={!interactive}
-      aria-label="Video abspielen"
+      aria-label={t("chatMisc.video.play")}
       className="relative block w-full disabled:cursor-default"
     >
       {!meta && <Skeleton className="absolute inset-0 rounded-xl" />}
@@ -69,7 +71,7 @@ export function ChatVideo({
       {meta && !meta.hasPicture && (
         <div className="flex h-40 flex-col items-center justify-center gap-1 text-xs text-white/70">
           <span className="text-2xl">🎬</span>
-          Video ohne Bild (nur Ton)
+          {t("chatMisc.video.audioOnly")}
         </div>
       )}
       {interactive && meta && (
@@ -92,6 +94,7 @@ export function ChatVideo({
 
 /** Full-screen player; autoplays (the tap that opened it counts as the gesture). */
 export function VideoLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  const t = useT();
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -106,12 +109,12 @@ export function VideoLightbox({ src, onClose }: { src: string; onClose: () => vo
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Video"
+      aria-label={t("chatMisc.video.label")}
     >
       <button
         type="button"
         onClick={onClose}
-        aria-label="Schließen"
+        aria-label={t("chatMisc.close")}
         className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">

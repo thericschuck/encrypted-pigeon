@@ -4,10 +4,13 @@
 export class ChatUploadError extends Error {
   /** HTTP status of the failed upload, if it got a response at all. */
   status?: number;
+  /** Message key (chatMisc.*) + params; the outbox translates them for display. */
+  params?: Record<string, string | number>;
 
-  constructor(message: string, status?: number) {
-    super(message);
+  constructor(messageKey: string, status?: number, params?: Record<string, string | number>) {
+    super(messageKey);
     this.status = status;
+    this.params = params;
   }
 }
 
@@ -59,21 +62,12 @@ export function uploadToBucket({
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else {
-        reject(
-          new ChatUploadError(
-            `Upload fehlgeschlagen (${xhr.status}). Bitte erneut versuchen.`,
-            xhr.status
-          )
-        );
+        reject(new ChatUploadError("chatMisc.upload.failedStatus", xhr.status, { status: xhr.status }));
       }
     };
 
     xhr.onerror = () => {
-      reject(
-        new ChatUploadError(
-          "Netzwerkfehler beim Upload. Bitte Verbindung prüfen und erneut versuchen."
-        )
-      );
+      reject(new ChatUploadError("chatMisc.upload.network"));
     };
 
     xhr.send(file);

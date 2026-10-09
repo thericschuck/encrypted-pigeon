@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Locale } from "@/lib/i18n/config";
+import type { TFunction } from "@/lib/i18n/translate";
 import type { Database, ScheduleAvailability, ScheduleCategory } from "@/lib/supabase/types";
 import {
   MINUTES_PER_DAY,
@@ -41,10 +43,7 @@ export interface Schedule {
 export const SLOT_MINUTES = 15;
 
 export interface CategoryInfo {
-  label: string;
   emoji: string;
-  /** "Eric ist gerade …" */
-  activity: string;
   defaultAvailability: ScheduleAvailability;
   /** Block colors in the week grid (full literal class names for Tailwind). */
   blockClass: string;
@@ -52,44 +51,32 @@ export interface CategoryInfo {
 
 export const SCHEDULE_CATEGORIES: Record<ScheduleCategory, CategoryInfo> = {
   training: {
-    label: "Training",
     emoji: "🥋",
-    activity: "beim Training",
     defaultAvailability: "unavailable",
     blockClass: "bg-[#f3d9cb] text-[#7a3517] border-[#c1643a] dark:bg-[#4a2a1a] dark:text-[#f2c7ae] dark:border-night-accent",
   },
   freizeit: {
-    label: "Freizeit",
     emoji: "☕",
-    activity: "in der Freizeit",
     defaultAvailability: "available",
     blockClass: "bg-[#dfe9d6] text-[#2f5129] border-[#3f6b3a] dark:bg-[#26331f] dark:text-[#c8dcb9] dark:border-[#6f9a5f]",
   },
   schlafen: {
-    label: "Schlafen",
     emoji: "🌙",
-    activity: "am Schlafen",
     defaultAvailability: "unavailable",
     blockClass: "bg-[#d8e3ee] text-[#1f4260] border-[#1f5f8b] dark:bg-[#1c2a36] dark:text-[#b7cde0] dark:border-[#5a8db5]",
   },
   essen: {
-    label: "Essen",
     emoji: "🍜",
-    activity: "beim Essen",
     defaultAvailability: "limited",
     blockClass: "bg-[#f5e7c4] text-[#6b4d0f] border-[#c29a3a] dark:bg-[#3a3019] dark:text-[#ecd9a6] dark:border-[#c29a3a]",
   },
   unterwegs: {
-    label: "Unterwegs",
     emoji: "🚌",
-    activity: "unterwegs",
     defaultAvailability: "limited",
     blockClass: "bg-[#e6dcef] text-[#4b2b72] border-[#6b3fa0] dark:bg-[#2d2238] dark:text-[#d4c3e6] dark:border-[#9a74c4]",
   },
   sonstiges: {
-    label: "Sonstiges",
     emoji: "📌",
-    activity: "beschäftigt",
     defaultAvailability: "limited",
     blockClass: "bg-neutral-100 text-neutral-700 border-neutral-400 dark:bg-night-raised dark:text-night-text dark:border-night-muted",
   },
@@ -97,16 +84,36 @@ export const SCHEDULE_CATEGORIES: Record<ScheduleCategory, CategoryInfo> = {
 
 export const CATEGORY_ORDER: ScheduleCategory[] = ["training", "freizeit", "schlafen", "essen", "unterwegs", "sonstiges"];
 
-export const AVAILABILITY_INFO: Record<ScheduleAvailability, { label: string; dotClass: string }> = {
-  available: { label: "erreichbar", dotClass: "bg-emerald-500" },
-  limited: { label: "eingeschränkt erreichbar", dotClass: "bg-amber-400" },
-  unavailable: { label: "nicht erreichbar", dotClass: "bg-neutral-400 dark:bg-night-muted" },
+export const AVAILABILITY_INFO: Record<ScheduleAvailability, { dotClass: string }> = {
+  available: { dotClass: "bg-emerald-500" },
+  limited: { dotClass: "bg-amber-400" },
+  unavailable: { dotClass: "bg-neutral-400 dark:bg-night-muted" },
 };
+
+/** Display name of a category ("Training"); the DB value stays the German enum. */
+export function categoryLabel(t: TFunction, category: ScheduleCategory): string {
+  return t(`schedule.category.${category}`);
+}
+
+/** "Eric ist gerade …" + this: "beim Training". */
+export function categoryActivity(t: TFunction, category: ScheduleCategory): string {
+  return t(`schedule.activity.${category}`);
+}
+
+/** "erreichbar" / "eingeschränkt erreichbar" / "nicht erreichbar". */
+export function availabilityLabel(t: TFunction, availability: ScheduleAvailability): string {
+  return t(`schedule.availability.${availability}`);
+}
+
+/** Shorter form for tight buttons: "eingeschränkt". */
+export function availabilityShortLabel(t: TFunction, availability: ScheduleAvailability): string {
+  return t(`schedule.availabilityShort.${availability}`);
+}
 
 export const AVAILABILITY_ORDER: ScheduleAvailability[] = ["available", "limited", "unavailable"];
 
-export function blockTitle(block: Pick<ScheduleBlock, "category" | "label">): string {
-  return block.label?.trim() || SCHEDULE_CATEGORIES[block.category].label;
+export function blockTitle(block: Pick<ScheduleBlock, "category" | "label">, t: TFunction): string {
+  return block.label?.trim() || categoryLabel(t, block.category);
 }
 
 /** Length in minutes; a block past midnight wraps (22:00–05:30 = 450). */
@@ -188,10 +195,11 @@ export function statusAt(schedule: Schedule, now: Date): ScheduleStatus | null {
 }
 
 /** "🥋 Training · nicht erreichbar · bis 17:00" (times in `viewerZone`). */
-export function describeStatus(status: ScheduleStatus, now: Date, viewerZone: string): string {
+export function describeStatus(status: ScheduleStatus, now: Date, viewerZone: string, t: TFunction, locale: Locale): string {
   const { block, end } = status.current;
   const category = SCHEDULE_CATEGORIES[block.category];
-  return `${category.emoji} ${blockTitle(block)} · ${AVAILABILITY_INFO[block.availability].label} · bis ${formatRelativeTime(end, now, viewerZone)}`;
+  const until = t("schedule.until", { time: formatRelativeTime(end, now, viewerZone, t, locale) });
+  return `${category.emoji} ${blockTitle(block, t)} · ${availabilityLabel(t, block.availability)} · ${until}`;
 }
 
 export interface DaySegment {

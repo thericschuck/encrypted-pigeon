@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useT } from "@/lib/i18n/client";
 
 interface VoiceMessagePlayerProps {
   src: string;
@@ -24,6 +25,7 @@ export function VoiceMessagePlayer({
   variant = "other",
   onError,
 }: VoiceMessagePlayerProps) {
+  const t = useT();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -95,7 +97,7 @@ export function VoiceMessagePlayer({
       <button
         type="button"
         onClick={togglePlay}
-        aria-label={isPlaying ? "Pause" : "Abspielen"}
+        aria-label={isPlaying ? t("chatMisc.voice.pause") : t("chatMisc.voice.play")}
         className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
           isOwn
             ? "bg-white/15 text-white"
@@ -122,7 +124,7 @@ export function VoiceMessagePlayer({
         onChange={handleSeek}
         style={{ accentColor: accent }}
         className="h-1.5 flex-1"
-        aria-label="Wiedergabeposition"
+        aria-label={t("chatMisc.voice.position")}
       />
       <span className="w-9 flex-shrink-0 text-right text-xs tabular-nums opacity-80">
         {formatDuration(isPlaying || currentTime > 0 ? currentTime : duration)}
