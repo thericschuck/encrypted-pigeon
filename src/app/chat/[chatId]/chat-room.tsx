@@ -71,6 +71,8 @@ import {
   type PendingAttachment,
 } from "@/lib/chat/outbox";
 
+type MediaAttachment = Exclude<PendingAttachment, { kind: "voice" }>;
+
 type MessageRow = Database["pigeon"]["Tables"]["messages"]["Row"];
 
 // What the message list renders: real messages, plus a placeholder for
@@ -305,7 +307,9 @@ export function ChatRoom({
   }, []);
   const [mode, setMode] = useState<MessageKind>("chat");
   const [draft, setDraft] = useState("");
-  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
+  const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [videoLightboxSrc, setVideoLightboxSrc] = useState<string | null>(null);
@@ -1071,35 +1075,41 @@ export function ChatRoom({
   // the device right before the upload (see performSend / lib/media).
   // Type detection falls back to the file extension: HEIC photos, for
   // one, often arrive without a MIME type.
-  function setFileAttachment(file: File) {
+  function addFileAttachments(files: File[]) {
     setComposerError(null);
-    if (looksLikeVideo(file)) {
-      setAttachment({ kind: "video", file, previewUrl: createObjectUrl(file) });
-    } else if (looksLikeImage(file)) {
-      setAttachment({ kind: "image", file, previewUrl: createObjectUrl(file) });
-    } else {
-      setComposerError(t("chatRoom.onlyImagesAndVideos"));
+    const added: MediaAttachment[] = [];
+    let skipped = false;
+    for (const file of files) {
+      if (looksLikeVideo(file)) {
+        added.push({ kind: "video", file, previewUrl: createObjectUrl(file) });
+      } else if (looksLikeImage(file)) {
+        added.push({ kind: "image", file, previewUrl: createObjectUrl(file) });
+      } else {
+        skipped = true;
+      }
     }
+    if (skipped) setComposerError(t("chatRoom.onlyImagesAndVideos"));
+    if (added.length > 0) setAttachments((prev) => [...prev, ...added]);
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) setFileAttachment(file);
+    const files = Array.from(event.target.files ?? []);
+    if (files.length > 0) addFileAttachments(files);
     event.target.value = "";
   }
 
   function handlePaste(event: ClipboardEvent<HTMLElement>) {
-    const file = Array.from(event.clipboardData.files).find((f) => looksLikeImage(f) || looksLikeVideo(f));
-    if (!file) return;
+    const files = Array.from(event.clipboardData.files).filter((f) => looksLikeImage(f) || looksLikeVideo(f));
+    if (files.length === 0) return;
     event.preventDefault();
-    setFileAttachment(file);
+    addFileAttachments(files);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragOver(false);
-    const file = event.dataTransfer.files[0];
-    if (file) setFileAttachment(file);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) addFileAttachments(files);
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -1112,10 +1122,10 @@ export function ChatRoom({
     setIsDragOver(false);
   }
 
-  function removeAttachment() {
+  function removeAttachment(previewUrl: string) {
     // Only drop the reference here — the object URL itself is revoked on
     // unmount, since a just-sent message may still be showing it.
-    setAttachment(null);
+    setAttachments((prev) => prev.filter((a) => a.previewUrl !== previewUrl));
   }
 
   function handleVoiceRecorded(result: RecordedVoice) {
@@ -1130,10 +1140,10 @@ export function ChatRoom({
     });
   }
 
-  function submitMessage(attachmentOverride?: NonNullable<typeof attachment>) {
-    const text = attachmentOverride ? "" : draft.trim();
-    const attachmentToSend = attachmentOverride ?? attachment;
-    if (!text && !attachmentToSend) return;
+  function submitMessage(voice?: PendingAttachment) {
+    const text = voice ? "" : draft.trim();
+    const toSend: (PendingAttachment | null)[] = voice ? [voice] : attachments.length > 0 ? attachments : [null];
+    if (!text && toSend[0] === null) return;
     const kind = mode;
     const replyToId = replyTo?.id ?? null;
 
@@ -1144,29 +1154,34 @@ export function ChatRoom({
     else playPigeonTakeoff();
 
     setDraft("");
-    setAttachment(null);
+    setAttachments([]);
     setReplyTo(null);
-
-    const id = crypto.randomUUID();
-    // The preview URL now belongs to the outbox: it has to outlive this
-    // component if I leave the chat mid-upload.
-    if (attachmentToSend) objectUrlsRef.current.delete(attachmentToSend.previewUrl);
     isAtBottomRef.current = true;
-    const sending = sendMessage({
-      id,
-      chatId,
-      senderId: currentUserId,
-      kind,
-      text: text || null,
-      replyToId,
-      attachment: attachmentToSend,
+
+    // One message per attachment; the caption and the reply go with the first.
+    const sent = toSend.map((attachmentToSend, index) => {
+      const id = crypto.randomUUID();
+      // The preview URL now belongs to the outbox: it has to outlive this
+      // component if I leave the chat mid-upload.
+      if (attachmentToSend) objectUrlsRef.current.delete(attachmentToSend.previewUrl);
+      const sending = sendMessage({
+        id,
+        chatId,
+        senderId: currentUserId,
+        kind,
+        text: index === 0 ? text || null : null,
+        replyToId: index === 0 ? replyToId : null,
+        attachment: attachmentToSend,
+      });
+      return { id, sending };
     });
+    const first = sent[0];
 
     if (kind === "chat") {
       // Instant chat: the message goes out right away in the background
       // (the recipient has it immediately); the sender sees the bubble at
       // once, with the hacker show playing in the chat background.
-      setEncryptingId(id);
+      setEncryptingId(first.id);
       return;
     }
 
@@ -1175,8 +1190,8 @@ export function ChatRoom({
     // ready" state until the flight row arrives a beat later. Back to
     // chat mode afterwards: letters are the deliberate exception.
     setMode("chat");
-    void sending.then((ok) => {
-      if (ok) setOpenFlightMessageId(id);
+    void first.sending.then((ok) => {
+      if (ok) setOpenFlightMessageId(first.id);
     });
   }
 
@@ -1286,7 +1301,7 @@ export function ChatRoom({
   const closeLightbox = useCallback(() => setLightboxSrc(null), []);
   const closeVideoLightbox = useCallback(() => setVideoLightboxSrc(null), []);
 
-  const hasSendableContent = !!draft.trim() || !!attachment;
+  const hasSendableContent = !!draft.trim() || attachments.length > 0;
   const isLetterMode = mode === "pigeon";
 
   useEffect(() => {
@@ -1713,75 +1728,110 @@ export function ChatRoom({
             onCancel={() => setReplyTo(null)}
           />
         )}
-        {attachment && (
-          <div className="mb-2 flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-night-border dark:bg-night-surface">
-            {attachment.kind === "video" ? (
-              <>
-                <video
-                  src={attachment.previewUrl}
-                  muted
-                  playsInline
-                  preload="metadata"
-                  className="h-12 w-12 rounded-lg bg-black object-cover"
-                />
-                <span className="flex-1 truncate text-xs text-neutral-500 dark:text-night-muted">
-                  🎬 {attachment.file.name}
-                </span>
-              </>
-            ) : attachment.kind === "image" ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={attachment.previewUrl}
-                  alt={t("chatRoom.selectedImageAlt")}
-                  className="h-12 w-12 rounded-lg object-cover"
-                />
-                <span className="flex-1 truncate text-xs text-neutral-500 dark:text-night-muted">
-                  {attachment.file.name}
-                </span>
-              </>
-            ) : (
-              <div className="min-w-0 flex-1">
-                <VoiceMessagePlayer
-                  src={attachment.previewUrl}
-                  durationSeconds={attachment.durationSeconds}
-                  variant="other"
-                />
+        {attachments.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 overflow-x-auto rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-night-border dark:bg-night-surface">
+            {attachments.map((attachment) => (
+              <div key={attachment.previewUrl} className="relative h-16 w-16 flex-shrink-0">
+                {attachment.kind === "video" ? (
+                  <>
+                    <video
+                      src={attachment.previewUrl}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="h-16 w-16 rounded-lg bg-black object-cover"
+                    />
+                    <span className="absolute bottom-0.5 left-0.5 text-xs">🎬</span>
+                  </>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={attachment.previewUrl}
+                    alt={t("chatRoom.selectedImageAlt")}
+                    className="h-16 w-16 rounded-lg object-cover"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.previewUrl)}
+                  aria-label={t("chatRoom.removeAttachment")}
+                  className="absolute -right-1 -top-1 rounded-full bg-neutral-700 p-0.5 text-white shadow"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-3.5 w-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
-            )}
+            ))}
             <button
               type="button"
-              onClick={removeAttachment}
-              aria-label={t("chatRoom.removeAttachment")}
-              className="flex-shrink-0 rounded-full p-1 text-neutral-500 hover:bg-neutral-200 dark:text-night-muted dark:hover:bg-night-raised"
+              onClick={() => galleryInputRef.current?.click()}
+              aria-label={t("chatRoom.addMoreAttachments")}
+              title={t("chatRoom.addMoreAttachments")}
+              className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-lg border border-dashed border-neutral-300 text-neutral-500 dark:border-night-border dark:text-night-muted"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                className="h-4 w-4"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-6 w-6">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
               </svg>
             </button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
+          {/* Gallery: the phone's photo picker (albums, multi-select). Files:
+              no accept filter, so the system file browser with its folders
+              opens; non-media files are rejected in addFileAttachments. */}
           <input
-            ref={fileInputRef}
+            ref={galleryInputRef}
             type="file"
             accept="image/*,video/*,.heic,.heif"
+            multiple
             onChange={handleFileInputChange}
             className="hidden"
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label={t("chatRoom.attachMedia")}
-            className="flex-shrink-0 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
-          >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <div className="relative flex-shrink-0">
+            {attachMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setAttachMenuOpen(false)} />
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-60 overflow-hidden rounded-xl border border-neutral-200 bg-white text-sm shadow-lg dark:border-night-border dark:bg-night-raised dark:text-night-text">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      galleryInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-night-surface"
+                  >
+                    <span aria-hidden="true">🖼️</span>
+                    {t("chatRoom.attachGallery")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-night-surface"
+                  >
+                    <span aria-hidden="true">📁</span>
+                    {t("chatRoom.attachFiles")}
+                  </button>
+                </div>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setAttachMenuOpen((open) => !open)}
+              aria-label={t("chatRoom.attachMedia")}
+              aria-expanded={attachMenuOpen}
+              className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
+            >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -1796,7 +1846,8 @@ export function ChatRoom({
                 d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a2 2 0 0 1-2.83-2.83l7.78-7.78"
               />
             </svg>
-          </button>
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => {

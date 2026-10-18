@@ -280,7 +280,10 @@ export function VoiceRecorderButton({
         resetUi();
 
         if (wasCancelled) return;
-        if (durationSeconds * 1000 < MIN_RECORDING_MS || blob.size === 0) return;
+        if (durationSeconds * 1000 < MIN_RECORDING_MS || blob.size === 0) {
+          onErrorRef.current(t("chatMisc.voiceRecorder.holdHint"));
+          return;
+        }
         onRecordedRef.current({ blob, durationSeconds, mimeType: type });
       };
 
@@ -477,10 +480,8 @@ export function VoiceRecorderButton({
               ? `translate(${-Math.min(drag.x, CANCEL_SWIPE_PX)}px, ${-Math.min(drag.y, LOCK_SWIPE_PX)}px) scale(1.5)`
               : undefined,
         }}
-        className={`rounded-full p-2 transition-colors ${
-          active
-            ? "bg-red-500 text-white"
-            : "text-neutral-500 hover:bg-neutral-100 dark:text-night-muted dark:hover:bg-night-raised"
+        className={`flex-shrink-0 rounded-full p-3 shadow-sm transition-colors ${
+          active ? "bg-red-500 text-white" : "bg-accent text-on-accent hover:opacity-90"
         } disabled:opacity-50`}
       >
         <svg
@@ -489,7 +490,7 @@ export function VoiceRecorderButton({
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
-          className="h-5 w-5"
+          className="h-6 w-6"
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 0 1-14 0M12 18v3" />
